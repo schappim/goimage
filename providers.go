@@ -11,10 +11,11 @@ import (
 const (
 	defaultProvider = "openai"
 
-	// OpenAI defaults — gpt-image-1 over gpt-image-2 because the newer model
-	// requires Organization Verification on the API key, while gpt-image-1
-	// works on a fresh key out of the box.
-	defaultOpenAIModel   = "gpt-image-1"
+	// OpenAI defaults. gpt-image-2 is the current recommended default per
+	// OpenAI's prompting guide. Note: this model requires API Organization
+	// Verification on the calling key; fall back to gpt-image-1 (or one of
+	// the *-1.5 / *-1-mini variants) via -m if verification isn't enabled.
+	defaultOpenAIModel   = "gpt-image-2"
 	defaultOpenAISize    = "1024x1024"
 	defaultOpenAIQuality = "auto"
 	defaultOpenAIFormat  = "png"

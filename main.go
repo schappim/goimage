@@ -181,7 +181,8 @@ func printUsage(w io.Writer) {
 
 	fmt.Fprintf(w, "OpenAI:\n")
 	fmt.Fprintf(w, "  Env var: OPENAI_API_KEY\n")
-	fmt.Fprintf(w, "  Models:  gpt-image-1 (default), gpt-image-1-mini, gpt-image-1.5, gpt-image-2\n")
+	fmt.Fprintf(w, "  Models:  gpt-image-2 (default), gpt-image-1.5, gpt-image-1, gpt-image-1-mini\n")
+	fmt.Fprintf(w, "           (gpt-image-2 requires API Organization Verification)\n")
 	fmt.Fprintf(w, "  Sizes:   1024x1024, 1536x1024, 1024x1536, auto\n")
 	fmt.Fprintf(w, "  Quality: low, medium, high, auto\n")
 	fmt.Fprintf(w, "  Formats: png (default), jpeg, webp\n\n")
