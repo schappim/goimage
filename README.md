@@ -106,12 +106,13 @@ goimage -p grok -n 4 -o variants.png "logo for a Go CLI called goimage"
 
 ### Choose a Model
 
-**OpenAI models:** `gpt-image-1` (default), `gpt-image-1-mini`, `gpt-image-1.5`, `gpt-image-2`
+**OpenAI models:** `gpt-image-2` (default), `gpt-image-1.5`, `gpt-image-1`, `gpt-image-1-mini`
 
-> `gpt-image-2` requires API Organization Verification. Use `gpt-image-1` if you don't have that enabled.
+> `gpt-image-2` requires API Organization Verification. If your key isn't verified, use `-m gpt-image-1` (or `gpt-image-1-mini` / `gpt-image-1.5`) to fall back to an earlier model.
 
 ```bash
-goimage -m gpt-image-2 "a photorealistic kitchen interior at golden hour"
+goimage "a photorealistic kitchen interior at golden hour"     # gpt-image-2 by default
+goimage -m gpt-image-1 "fallback when your key isn't verified"
 goimage -m gpt-image-1-mini "quick thumbnail of a smiling robot"
 ```
 
@@ -183,7 +184,7 @@ goimage --open "a desk setup with mechanical keyboard and ferns"
 | Feature           | OpenAI                 | Google (nano banana)             | Grok                |
 |-------------------|------------------------|----------------------------------|---------------------|
 | Env var           | `OPENAI_API_KEY`       | `GEMINI_API_KEY` / `GOOGLE_API_KEY` | `XAI_API_KEY` / `GROK_API_KEY` |
-| Default model     | `gpt-image-1`          | `gemini-2.5-flash-image`         | `grok-2-image`      |
+| Default model     | `gpt-image-2`          | `gemini-2.5-flash-image`         | `grok-2-image`      |
 | Size control      | Yes (size flag)        | Aspect ratio only                | Provider-fixed      |
 | Quality control   | Yes (`low/medium/high`)| No                               | No                  |
 | Output formats    | PNG, JPEG, WebP        | PNG                              | PNG                 |
