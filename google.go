@@ -2,10 +2,13 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -61,11 +64,14 @@ type googleError struct {
 }
 
 // generateGoogle calls Gemini 2.5 Flash Image. The REST API generates one
-// image per request, so multi-image runs loop the call.
+// image per request, so multi-image runs loop the call. Reference images are
+// attached as additional inlineData parts alongside the text prompt.
 func generateGoogle(apiKey, model, prompt, aspect string, count int, inputs []string) ([]generatedImage, error) {
-	if len(inputs) > 0 {
-		return nil, fmt.Errorf("google reference-image support not yet wired in")
+	refParts, err := loadInlineParts(inputs)
+	if err != nil {
+		return nil, err
 	}
+
 	out := make([]generatedImage, 0, count)
 	for i := 0; i < count; i++ {
 		label := "google"
@@ -73,7 +79,7 @@ func generateGoogle(apiKey, model, prompt, aspect string, count int, inputs []st
 			label = fmt.Sprintf("google %d/%d", i+1, count)
 		}
 		body, err := withRetry(label, func() ([]byte, error) {
-			return googleCall(apiKey, model, prompt, aspect)
+			return googleCall(apiKey, model, prompt, aspect, refParts)
 		})
 		if err != nil {
 			return nil, err
@@ -134,11 +140,47 @@ func extFromMIME(mime string) string {
 	return "png"
 }
 
-func googleCall(apiKey, model, prompt, aspect string) ([]byte, error) {
+// loadInlineParts reads each reference image off disk and returns Gemini
+// inlineData parts ready to embed in the request body.
+func loadInlineParts(paths []string) ([]googlePart, error) {
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	parts := make([]googlePart, 0, len(paths))
+	for _, p := range paths {
+		raw, err := os.ReadFile(p)
+		if err != nil {
+			return nil, fmt.Errorf("read reference image %s: %w", p, err)
+		}
+		parts = append(parts, googlePart{
+			InlineData: &googleInlineData{
+				MIMEType: mimeFromExt(p),
+				Data:     base64.StdEncoding.EncodeToString(raw),
+			},
+		})
+	}
+	return parts, nil
+}
+
+func mimeFromExt(path string) string {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".webp":
+		return "image/webp"
+	case ".gif":
+		return "image/gif"
+	}
+	return "image/png"
+}
+
+func googleCall(apiKey, model, prompt, aspect string, refParts []googlePart) ([]byte, error) {
+	parts := append([]googlePart{}, refParts...)
+	parts = append(parts, googlePart{Text: prompt})
 	req := googleRequest{
-		Contents: []googleContent{
-			{Parts: []googlePart{{Text: prompt}}},
-		},
+		Contents: []googleContent{{Parts: parts}},
 	}
 	if aspect != "" {
 		req.GenerationConfig = &googleGenerationConfig{
