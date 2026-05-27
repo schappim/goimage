@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -47,6 +49,19 @@ type generatedImage struct {
 	data          []byte
 	ext           string // "png", "jpeg", "webp"
 	revisedPrompt string
+}
+
+// decodeB64 accepts either a bare base64 payload or a data-URI string
+// ("data:image/png;base64,..."). Providers normalise to bare base64 in their
+// docs but some return data URIs in practice, so handle both.
+func decodeB64(s string) ([]byte, error) {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "data:") {
+		if i := strings.Index(s, ","); i >= 0 {
+			s = s[i+1:]
+		}
+	}
+	return base64.StdEncoding.DecodeString(s)
 }
 
 // withRetry retries fn up to maxRetries times with exponential backoff.
