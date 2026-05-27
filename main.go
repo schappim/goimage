@@ -17,6 +17,14 @@ import (
 // shelling out to `open`/`xdg-open`/`start`.
 var openImageFn = openImage
 
+// stringSlice is a flag.Value that lets repeated occurrences of the same flag
+// accumulate (e.g. `-i a.png -i b.png` yields ["a.png", "b.png"]). The
+// stdlib flag package doesn't ship one of these.
+type stringSlice []string
+
+func (s *stringSlice) String() string     { return strings.Join(*s, ",") }
+func (s *stringSlice) Set(v string) error { *s = append(*s, v); return nil }
+
 func main() {
 	var stdin io.Reader = strings.NewReader("")
 	if stat, err := os.Stdin.Stat(); err == nil && (stat.Mode()&os.ModeCharDevice) == 0 {
@@ -41,6 +49,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 		openIt   bool
 		token    string
 		help     bool
+		inputs   stringSlice
+		mask     string
 	)
 
 	fs := flag.NewFlagSet("goimage", flag.ContinueOnError)
@@ -61,6 +71,9 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 	fs.IntVar(&count, "count", defaultCount, "Number of images to generate")
 	fs.IntVar(&count, "n", defaultCount, "Number of images to generate (shorthand)")
 	fs.BoolVar(&openIt, "open", false, "Open saved image(s) in the default OS viewer")
+	fs.Var(&inputs, "input", "Reference image path (repeatable) for image-to-image / edit")
+	fs.Var(&inputs, "i", "Reference image path (shorthand, repeatable)")
+	fs.StringVar(&mask, "mask", "", "Mask image (alpha channel) for OpenAI inpainting")
 	fs.StringVar(&token, "token", "", "API key for the provider")
 	fs.BoolVar(&help, "help", false, "Show help")
 	fs.BoolVar(&help, "h", false, "Show help (shorthand)")
@@ -129,7 +142,12 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 		return 1
 	}
 
-	images, err := generate(provider, apiKey, model, prompt, size, quality, format, aspect, count, stderr)
+	if mask != "" && len(inputs) == 0 {
+		fmt.Fprintln(stderr, "Error: --mask requires at least one --input image")
+		return 1
+	}
+
+	images, err := generate(provider, apiKey, model, prompt, size, quality, format, aspect, count, inputs, mask, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "Error generating image: %v\n", err)
 		return 1
@@ -175,6 +193,8 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "      --format     Output format: png, jpeg, webp (OpenAI)\n")
 	fmt.Fprintf(w, "      --aspect     Aspect ratio (Google): 1:1, 16:9, 9:16, 4:3, 3:4\n")
 	fmt.Fprintf(w, "  -n, --count      Number of images to generate (default: 1)\n")
+	fmt.Fprintf(w, "  -i, --input      Reference image path (repeatable) for image-to-image / edit\n")
+	fmt.Fprintf(w, "      --mask       Mask image (alpha channel) for OpenAI inpainting\n")
 	fmt.Fprintf(w, "      --open       Open the saved image in your default viewer\n")
 	fmt.Fprintf(w, "      --token      API key (or set provider env var)\n")
 	fmt.Fprintf(w, "  -h, --help       Show this help message\n\n")
@@ -206,14 +226,14 @@ func printUsage(w io.Writer) {
 
 // generate dispatches to the requested provider. Kept as its own seam so each
 // provider's signature can vary while run() stays small.
-func generate(provider, apiKey, model, prompt, size, quality, format, aspect string, count int, stderr io.Writer) ([]generatedImage, error) {
+func generate(provider, apiKey, model, prompt, size, quality, format, aspect string, count int, inputs []string, mask string, stderr io.Writer) ([]generatedImage, error) {
 	switch provider {
 	case "openai":
-		return generateOpenAI(apiKey, model, prompt, size, quality, format, count)
+		return generateOpenAI(apiKey, model, prompt, size, quality, format, count, inputs, mask)
 	case "google":
-		return generateGoogle(apiKey, model, prompt, aspect, count)
+		return generateGoogle(apiKey, model, prompt, aspect, count, inputs)
 	case "grok":
-		return generateGrok(apiKey, model, prompt, count)
+		return generateGrok(apiKey, model, prompt, count, inputs)
 	}
 	return nil, fmt.Errorf("unknown provider %q", provider)
 }

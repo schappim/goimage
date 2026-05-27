@@ -62,7 +62,10 @@ type googleError struct {
 
 // generateGoogle calls Gemini 2.5 Flash Image. The REST API generates one
 // image per request, so multi-image runs loop the call.
-func generateGoogle(apiKey, model, prompt, aspect string, count int) ([]generatedImage, error) {
+func generateGoogle(apiKey, model, prompt, aspect string, count int, inputs []string) ([]generatedImage, error) {
+	if len(inputs) > 0 {
+		return nil, fmt.Errorf("google reference-image support not yet wired in")
+	}
 	out := make([]generatedImage, 0, count)
 	for i := 0; i < count; i++ {
 		label := "google"

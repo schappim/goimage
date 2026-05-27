@@ -37,7 +37,10 @@ type openAIError struct {
 	Message string `json:"message"`
 }
 
-func generateOpenAI(apiKey, model, prompt, size, quality, format string, count int) ([]generatedImage, error) {
+func generateOpenAI(apiKey, model, prompt, size, quality, format string, count int, inputs []string, mask string) ([]generatedImage, error) {
+	if len(inputs) > 0 || mask != "" {
+		return nil, fmt.Errorf("openai reference-image support not yet wired in")
+	}
 	if size == "" {
 		size = defaultOpenAISize
 	}

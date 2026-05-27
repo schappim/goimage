@@ -196,7 +196,7 @@ func TestGenerateOpenAI_HappyPath(t *testing.T) {
 
 	swapURL(&openAIAPIURL, srv.URL)(t)
 
-	imgs, err := generateOpenAI("test-key", "gpt-image-1", "a cat", "1024x1024", "high", "png", 1)
+	imgs, err := generateOpenAI("test-key", "gpt-image-1", "a cat", "1024x1024", "high", "png", 1, nil, "")
 	if err != nil {
 		t.Fatalf("generateOpenAI: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestGenerateOpenAI_JpegMapsToJpgExt(t *testing.T) {
 	defer srv.Close()
 	swapURL(&openAIAPIURL, srv.URL)(t)
 
-	imgs, err := generateOpenAI("k", "gpt-image-1", "x", "", "", "jpeg", 1)
+	imgs, err := generateOpenAI("k", "gpt-image-1", "x", "", "", "jpeg", 1, nil, "")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestGenerateOpenAI_JpegMapsToJpgExt(t *testing.T) {
 }
 
 func TestGenerateOpenAI_InvalidFormatRejected(t *testing.T) {
-	_, err := generateOpenAI("k", "gpt-image-1", "x", "", "", "bmp", 1)
+	_, err := generateOpenAI("k", "gpt-image-1", "x", "", "", "bmp", 1, nil, "")
 	if err == nil || !strings.Contains(err.Error(), "invalid OpenAI format") {
 		t.Fatalf("expected format validation error, got %v", err)
 	}
@@ -255,7 +255,7 @@ func TestGenerateOpenAI_APIErrorSurfaces(t *testing.T) {
 	defer srv.Close()
 	swapURL(&openAIAPIURL, srv.URL)(t)
 
-	_, err := generateOpenAI("k", "gpt-image-1", "x", "", "", "png", 1)
+	_, err := generateOpenAI("k", "gpt-image-1", "x", "", "", "png", 1, nil, "")
 	if err == nil || !strings.Contains(err.Error(), "API error (401)") {
 		t.Fatalf("expected 401 surface, got %v", err)
 	}
@@ -288,7 +288,7 @@ func TestGenerateGoogle_HappyPathWithAspectRatio(t *testing.T) {
 	defer srv.Close()
 	swapURL(&googleAPIURL, srv.URL)(t)
 
-	imgs, err := generateGoogle("g-key", "gemini-2.5-flash-image", "a fox", "16:9", 1)
+	imgs, err := generateGoogle("g-key", "gemini-2.5-flash-image", "a fox", "16:9", 1, nil)
 	if err != nil {
 		t.Fatalf("generateGoogle: %v", err)
 	}
@@ -317,7 +317,7 @@ func TestGenerateGoogle_OmitsGenerationConfigWhenNoAspect(t *testing.T) {
 	defer srv.Close()
 	swapURL(&googleAPIURL, srv.URL)(t)
 
-	_, err := generateGoogle("k", "gemini-2.5-flash-image", "x", "", 1)
+	_, err := generateGoogle("k", "gemini-2.5-flash-image", "x", "", 1, nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -343,7 +343,7 @@ func TestGenerateGoogle_LoopsForCount(t *testing.T) {
 	defer srv.Close()
 	swapURL(&googleAPIURL, srv.URL)(t)
 
-	imgs, err := generateGoogle("k", "gemini-2.5-flash-image", "x", "", 3)
+	imgs, err := generateGoogle("k", "gemini-2.5-flash-image", "x", "", 3, nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -365,7 +365,7 @@ func TestGenerateGoogle_NoInlineDataIsError(t *testing.T) {
 	defer srv.Close()
 	swapURL(&googleAPIURL, srv.URL)(t)
 
-	_, err := generateGoogle("k", "gemini-2.5-flash-image", "x", "", 1)
+	_, err := generateGoogle("k", "gemini-2.5-flash-image", "x", "", 1, nil)
 	if err == nil || !strings.Contains(err.Error(), "no image parts") {
 		t.Fatalf("expected 'no image parts' error, got %v", err)
 	}
@@ -388,7 +388,7 @@ func TestGenerateGrok_HappyPath(t *testing.T) {
 	defer srv.Close()
 	swapURL(&grokAPIURL, srv.URL)(t)
 
-	imgs, err := generateGrok("xai", "grok-2-image", "logo", 1)
+	imgs, err := generateGrok("xai", "grok-2-image", "logo", 1, nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -408,7 +408,7 @@ func TestGenerateGrok_EmptyB64IsError(t *testing.T) {
 	defer srv.Close()
 	swapURL(&grokAPIURL, srv.URL)(t)
 
-	_, err := generateGrok("k", "grok-2-image", "x", 1)
+	_, err := generateGrok("k", "grok-2-image", "x", 1, nil)
 	if err == nil || !strings.Contains(err.Error(), "without b64_json") {
 		t.Fatalf("expected b64_json missing error, got %v", err)
 	}

@@ -35,7 +35,10 @@ type grokError struct {
 	Message string `json:"message"`
 }
 
-func generateGrok(apiKey, model, prompt string, count int) ([]generatedImage, error) {
+func generateGrok(apiKey, model, prompt string, count int, inputs []string) ([]generatedImage, error) {
+	if len(inputs) > 0 {
+		return nil, fmt.Errorf("grok does not support reference images")
+	}
 	body, err := withRetry("grok", func() ([]byte, error) {
 		return grokCall(apiKey, model, prompt, count)
 	})
