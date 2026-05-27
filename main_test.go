@@ -416,14 +416,37 @@ func TestGenerateGrok_EmptyB64IsError(t *testing.T) {
 
 // ---------- run() integration ----------
 
-func TestRun_HelpFlag(t *testing.T) {
-	var stderr bytes.Buffer
-	code := run([]string{"--help"}, strings.NewReader(""), io.Discard, &stderr, envMap(nil))
+func TestRun_HelpFlagPrintsToStdout(t *testing.T) {
+	// Explicit --help should print to stdout (POSIX convention) so that
+	// `goimage --help | grep ...` and Homebrew's `shell_output` work.
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--help"}, strings.NewReader(""), &stdout, &stderr, envMap(nil))
 	if code != 0 {
 		t.Fatalf("want exit 0, got %d", code)
 	}
+	if !strings.Contains(stdout.String(), "Usage: goimage") {
+		t.Fatalf("help text not on stdout: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("explicit --help should not write to stderr, got: %q", stderr.String())
+	}
+}
+
+func TestRun_UsageOnErrorGoesToStderr(t *testing.T) {
+	// Missing-prompt path should still print usage to stderr so it doesn't
+	// pollute downstream pipes when a script accidentally invokes goimage
+	// with no arg.
+	var stdout, stderr bytes.Buffer
+	code := run(nil, strings.NewReader(""), &stdout, &stderr,
+		envMap(map[string]string{"OPENAI_API_KEY": "k"}))
+	if code != 1 {
+		t.Fatalf("want exit 1, got %d", code)
+	}
 	if !strings.Contains(stderr.String(), "Usage: goimage") {
-		t.Fatalf("help text missing: %s", stderr.String())
+		t.Fatalf("usage missing from stderr on error path: %s", stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("error path should not write to stdout, got: %q", stdout.String())
 	}
 }
 

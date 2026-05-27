@@ -65,52 +65,17 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 	fs.BoolVar(&help, "help", false, "Show help")
 	fs.BoolVar(&help, "h", false, "Show help (shorthand)")
 
-	fs.Usage = func() {
-		fmt.Fprintf(stderr, "goimage - Image generation via OpenAI, Google nano banana, or xAI Grok\n\n")
-		fmt.Fprintf(stderr, "Usage: goimage [options] [prompt]\n")
-		fmt.Fprintf(stderr, "       echo 'prompt' | goimage [options]\n\n")
-		fmt.Fprintf(stderr, "Options:\n")
-		fmt.Fprintf(stderr, "  -p, --provider   Provider: openai, google, grok (default: openai)\n")
-		fmt.Fprintf(stderr, "  -m, --model      Model to use (provider-specific default)\n")
-		fmt.Fprintf(stderr, "  -o, --output     Save image to this path (auto-named if omitted)\n")
-		fmt.Fprintf(stderr, "  -s, --size       Image size, e.g. 1024x1024 (OpenAI / Grok)\n")
-		fmt.Fprintf(stderr, "  -q, --quality    Quality: low, medium, high, auto (OpenAI)\n")
-		fmt.Fprintf(stderr, "      --format     Output format: png, jpeg, webp (OpenAI)\n")
-		fmt.Fprintf(stderr, "      --aspect     Aspect ratio (Google): 1:1, 16:9, 9:16, 4:3, 3:4\n")
-		fmt.Fprintf(stderr, "  -n, --count      Number of images to generate (default: 1)\n")
-		fmt.Fprintf(stderr, "      --open       Open the saved image in your default viewer\n")
-		fmt.Fprintf(stderr, "      --token      API key (or set provider env var)\n")
-		fmt.Fprintf(stderr, "  -h, --help       Show this help message\n\n")
-
-		fmt.Fprintf(stderr, "OpenAI:\n")
-		fmt.Fprintf(stderr, "  Env var: OPENAI_API_KEY\n")
-		fmt.Fprintf(stderr, "  Models:  gpt-image-1 (default), gpt-image-1-mini, gpt-image-1.5, gpt-image-2\n")
-		fmt.Fprintf(stderr, "  Sizes:   1024x1024, 1536x1024, 1024x1536, auto\n")
-		fmt.Fprintf(stderr, "  Quality: low, medium, high, auto\n")
-		fmt.Fprintf(stderr, "  Formats: png (default), jpeg, webp\n\n")
-
-		fmt.Fprintf(stderr, "Google (nano banana):\n")
-		fmt.Fprintf(stderr, "  Env var: GEMINI_API_KEY (or GOOGLE_API_KEY)\n")
-		fmt.Fprintf(stderr, "  Models:  gemini-2.5-flash-image (default)\n")
-		fmt.Fprintf(stderr, "  Aspect:  1:1 (default), 16:9, 9:16, 4:3, 3:4\n\n")
-
-		fmt.Fprintf(stderr, "Grok (xAI):\n")
-		fmt.Fprintf(stderr, "  Env var: XAI_API_KEY (or GROK_API_KEY)\n")
-		fmt.Fprintf(stderr, "  Models:  grok-2-image (default)\n")
-		fmt.Fprintf(stderr, "  Note:    size/quality/format are ignored by Grok\n\n")
-
-		fmt.Fprintf(stderr, "Examples:\n")
-		fmt.Fprintf(stderr, "  goimage \"a watercolor of a fox in autumn leaves\"\n")
-		fmt.Fprintf(stderr, "  goimage -p google \"a cyberpunk teacup\" --aspect 16:9 --open\n")
-		fmt.Fprintf(stderr, "  echo \"a logo for goimage\" | goimage -p grok -o logo.png\n")
-		fmt.Fprintf(stderr, "  goimage -n 4 -o variants.png \"hand-drawn space whale\"\n")
-	}
+	// Usage triggered by flag parser errors or by the "missing required input"
+	// paths goes to stderr. Explicit --help is handled below and prints to
+	// stdout so callers like `goimage --help | grep ...` (and the Homebrew
+	// formula test, which only captures stdout) see the help text.
+	fs.Usage = func() { printUsage(stderr) }
 
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if help {
-		fs.Usage()
+		printUsage(stdout)
 		return 0
 	}
 
@@ -191,6 +156,51 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 		}
 	}
 	return 0
+}
+
+// printUsage writes the CLI's help text. POSIX convention is help-on-stdout
+// when the user asked explicitly (--help), help-on-stderr when triggered by a
+// flag parser error or missing required input. Centralised here so both paths
+// stay identical.
+func printUsage(w io.Writer) {
+	fmt.Fprintf(w, "goimage - Image generation via OpenAI, Google nano banana, or xAI Grok\n\n")
+	fmt.Fprintf(w, "Usage: goimage [options] [prompt]\n")
+	fmt.Fprintf(w, "       echo 'prompt' | goimage [options]\n\n")
+	fmt.Fprintf(w, "Options:\n")
+	fmt.Fprintf(w, "  -p, --provider   Provider: openai, google, grok (default: openai)\n")
+	fmt.Fprintf(w, "  -m, --model      Model to use (provider-specific default)\n")
+	fmt.Fprintf(w, "  -o, --output     Save image to this path (auto-named if omitted)\n")
+	fmt.Fprintf(w, "  -s, --size       Image size, e.g. 1024x1024 (OpenAI / Grok)\n")
+	fmt.Fprintf(w, "  -q, --quality    Quality: low, medium, high, auto (OpenAI)\n")
+	fmt.Fprintf(w, "      --format     Output format: png, jpeg, webp (OpenAI)\n")
+	fmt.Fprintf(w, "      --aspect     Aspect ratio (Google): 1:1, 16:9, 9:16, 4:3, 3:4\n")
+	fmt.Fprintf(w, "  -n, --count      Number of images to generate (default: 1)\n")
+	fmt.Fprintf(w, "      --open       Open the saved image in your default viewer\n")
+	fmt.Fprintf(w, "      --token      API key (or set provider env var)\n")
+	fmt.Fprintf(w, "  -h, --help       Show this help message\n\n")
+
+	fmt.Fprintf(w, "OpenAI:\n")
+	fmt.Fprintf(w, "  Env var: OPENAI_API_KEY\n")
+	fmt.Fprintf(w, "  Models:  gpt-image-1 (default), gpt-image-1-mini, gpt-image-1.5, gpt-image-2\n")
+	fmt.Fprintf(w, "  Sizes:   1024x1024, 1536x1024, 1024x1536, auto\n")
+	fmt.Fprintf(w, "  Quality: low, medium, high, auto\n")
+	fmt.Fprintf(w, "  Formats: png (default), jpeg, webp\n\n")
+
+	fmt.Fprintf(w, "Google (nano banana):\n")
+	fmt.Fprintf(w, "  Env var: GEMINI_API_KEY (or GOOGLE_API_KEY)\n")
+	fmt.Fprintf(w, "  Models:  gemini-2.5-flash-image (default)\n")
+	fmt.Fprintf(w, "  Aspect:  1:1 (default), 16:9, 9:16, 4:3, 3:4\n\n")
+
+	fmt.Fprintf(w, "Grok (xAI):\n")
+	fmt.Fprintf(w, "  Env var: XAI_API_KEY (or GROK_API_KEY)\n")
+	fmt.Fprintf(w, "  Models:  grok-2-image (default)\n")
+	fmt.Fprintf(w, "  Note:    size/quality/format are ignored by Grok\n\n")
+
+	fmt.Fprintf(w, "Examples:\n")
+	fmt.Fprintf(w, "  goimage \"a watercolor of a fox in autumn leaves\"\n")
+	fmt.Fprintf(w, "  goimage -p google \"a cyberpunk teacup\" --aspect 16:9 --open\n")
+	fmt.Fprintf(w, "  echo \"a logo for goimage\" | goimage -p grok -o logo.png\n")
+	fmt.Fprintf(w, "  goimage -n 4 -o variants.png \"hand-drawn space whale\"\n")
 }
 
 // generate dispatches to the requested provider. Kept as its own seam so each
