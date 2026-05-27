@@ -1,0 +1,6 @@
+/goimage
+*.png
+*.jpg
+*.jpeg
+*.webp
+.DS_Store
