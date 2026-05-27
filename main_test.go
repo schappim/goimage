@@ -593,6 +593,169 @@ func TestRun_OpenFlagCallsOpenImageFn(t *testing.T) {
 	}
 }
 
+// ---------- reference image support ----------
+
+func writeTempPNG(t *testing.T, name string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(path, tinyPNG, 0644); err != nil {
+		t.Fatalf("write temp png: %v", err)
+	}
+	return path
+}
+
+func TestGenerateOpenAI_EditWithInputsAndMask(t *testing.T) {
+	in1 := writeTempPNG(t, "ref1.png")
+	in2 := writeTempPNG(t, "ref2.png")
+	maskPath := writeTempPNG(t, "mask.png")
+
+	var (
+		gotPrompt    string
+		gotModel     string
+		imageCount   int
+		gotMaskBytes int
+	)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			t.Errorf("want POST, got %s", r.Method)
+		}
+		if !strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+			t.Errorf("want multipart, got %q", r.Header.Get("Content-Type"))
+		}
+		if err := r.ParseMultipartForm(10 << 20); err != nil {
+			t.Fatalf("parse multipart: %v", err)
+		}
+		gotPrompt = r.FormValue("prompt")
+		gotModel = r.FormValue("model")
+		imageCount = len(r.MultipartForm.File["image[]"])
+		if hs, ok := r.MultipartForm.File["mask"]; ok && len(hs) > 0 {
+			f, _ := hs[0].Open()
+			defer f.Close()
+			b, _ := io.ReadAll(f)
+			gotMaskBytes = len(b)
+		}
+		resp := openAIResponse{Data: []openAIImageData{
+			{B64JSON: base64.StdEncoding.EncodeToString(tinyPNG)},
+		}}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+	swapURL(&openAIEditsAPIURL, srv.URL)(t)
+
+	imgs, err := generateOpenAI("k", "gpt-image-2", "swap the sky", "1024x1024", "high", "png", 1,
+		[]string{in1, in2}, maskPath)
+	if err != nil {
+		t.Fatalf("generateOpenAI (edit): %v", err)
+	}
+	if len(imgs) != 1 {
+		t.Fatalf("want 1 image, got %d", len(imgs))
+	}
+	if gotPrompt != "swap the sky" {
+		t.Fatalf("prompt not threaded through: %q", gotPrompt)
+	}
+	if gotModel != "gpt-image-2" {
+		t.Fatalf("model not threaded through: %q", gotModel)
+	}
+	if imageCount != 2 {
+		t.Fatalf("want 2 image[] uploads, got %d", imageCount)
+	}
+	if gotMaskBytes == 0 {
+		t.Fatalf("mask was not attached")
+	}
+}
+
+func TestGenerateOpenAI_EditMissingInputFails(t *testing.T) {
+	_, err := generateOpenAI("k", "gpt-image-2", "x", "", "", "png", 1,
+		[]string{"/nonexistent/ref.png"}, "")
+	if err == nil || !strings.Contains(err.Error(), "open /nonexistent/ref.png") {
+		t.Fatalf("expected missing-file error, got %v", err)
+	}
+}
+
+func TestGenerateGoogle_AttachesInlineDataForReferences(t *testing.T) {
+	ref := writeTempPNG(t, "fox.png")
+
+	var gotReq googleRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotReq); err != nil {
+			t.Fatalf("decode req: %v", err)
+		}
+		resp := googleResponse{Candidates: []googleCandidate{{
+			Content: googleContent{Parts: []googlePart{{
+				InlineData: &googleInlineData{MIMEType: "image/png", Data: base64.StdEncoding.EncodeToString(tinyPNG)},
+			}}},
+		}}}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+	swapURL(&googleAPIURL, srv.URL)(t)
+
+	_, err := generateGoogle("k", "gemini-2.5-flash-image", "make it autumn", "", 1, []string{ref})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	parts := gotReq.Contents[0].Parts
+	if len(parts) != 2 {
+		t.Fatalf("want 2 parts (inlineData + text), got %d: %#v", len(parts), parts)
+	}
+	if parts[0].InlineData == nil || parts[0].InlineData.MIMEType != "image/png" {
+		t.Fatalf("first part should be inlineData PNG, got %#v", parts[0])
+	}
+	if parts[1].Text != "make it autumn" {
+		t.Fatalf("second part should carry the text prompt, got %#v", parts[1])
+	}
+	// The inlineData base64 should round-trip to the tiny PNG bytes.
+	raw, err := base64.StdEncoding.DecodeString(parts[0].InlineData.Data)
+	if err != nil || !bytes.Equal(raw, tinyPNG) {
+		t.Fatalf("inline data did not round-trip: err=%v", err)
+	}
+}
+
+func TestGenerateGoogle_ReferenceReadErrorBubbles(t *testing.T) {
+	_, err := generateGoogle("k", "gemini-2.5-flash-image", "x", "", 1, []string{"/nonexistent/r.png"})
+	if err == nil || !strings.Contains(err.Error(), "read reference image") {
+		t.Fatalf("expected file-read error, got %v", err)
+	}
+}
+
+func TestGenerateGrok_RefusesReferenceImages(t *testing.T) {
+	_, err := generateGrok("k", "grok-2-image", "x", 1, []string{"any.png"})
+	if err == nil || !strings.Contains(err.Error(), "does not support reference images") {
+		t.Fatalf("expected grok rejection, got %v", err)
+	}
+}
+
+func TestRun_MaskWithoutInputIsError(t *testing.T) {
+	var stderr bytes.Buffer
+	code := run([]string{"--mask", "m.png", "hi"}, strings.NewReader(""), io.Discard, &stderr,
+		envMap(map[string]string{"OPENAI_API_KEY": "k"}))
+	if code != 1 {
+		t.Fatalf("want exit 1, got %d", code)
+	}
+	if !strings.Contains(stderr.String(), "--mask requires") {
+		t.Fatalf("mask validation message missing: %s", stderr.String())
+	}
+}
+
+func TestMimeFromExt(t *testing.T) {
+	cases := map[string]string{
+		"a.png":   "image/png",
+		"a.JPG":   "image/jpeg",
+		"a.jpeg":  "image/jpeg",
+		"a.webp":  "image/webp",
+		"a.gif":   "image/gif",
+		"a.bmp":   "image/png",
+		"no-ext":  "image/png",
+		"x.tIfF":  "image/png",
+	}
+	for in, want := range cases {
+		if got := mimeFromExt(in); got != want {
+			t.Errorf("mimeFromExt(%q): want %q, got %q", in, want, got)
+		}
+	}
+}
+
 // swapURL swaps a *string package var for the duration of a test and
 // registers a cleanup that restores it. Letting providers keep their URLs as
 // package vars makes httptest substitution trivial.
