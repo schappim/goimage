@@ -6,6 +6,8 @@ A self-contained command-line tool for image generation using OpenAI (GPT Image)
 
 - **Multiple image providers**: OpenAI, Google nano banana, xAI Grok
 - **Single binary** - written in pure Go, no Python, no node, no ffmpeg
+- **Reference input images** (`-i`) for image-to-image / edits on OpenAI and Google
+- **Mask support** (`--mask`) for OpenAI inpainting
 - **Automatic retries** - up to 3 attempts per request with exponential backoff
 - Provider-native model defaults and overrides
 - Prompt from arguments or stdin (great for piping)
@@ -155,6 +157,27 @@ goimage -n 3 -o cat.png "a cat in a hat"
 
 > Google generates one image per request, so `-n` makes N separate API calls.
 
+### Reference Images (image-to-image / edits)
+
+Pass `-i` one or more times to use existing images as reference. OpenAI swaps to its `/v1/images/edits` endpoint; Google attaches each image as an `inlineData` part alongside the prompt. Grok does not support reference images and will error.
+
+```bash
+# Re-render an image with a new style
+goimage -i original.png "make it watercolor"
+
+# Multi-image composition (OpenAI gift basket pattern)
+goimage -i lotion.png -i bath-bomb.png -i incense.png \
+        "a photorealistic gift basket containing all of these items"
+
+# Inpainting with a mask (OpenAI only — mask alpha channel defines edit area)
+goimage -i lounge.png --mask pool-mask.png "put a flamingo in the pool"
+
+# Google nano banana conversational edit
+goimage -p google -i fox.png "make the season autumn, add falling leaves"
+```
+
+**Mask requirements (OpenAI):** PNG with an alpha channel, same dimensions as the first input image.
+
 ### Open in Default Viewer
 
 ```bash
@@ -175,6 +198,8 @@ goimage --open "a desk setup with mechanical keyboard and ferns"
 | `--format`    |       | `png` / `jpeg` / `webp` (OpenAI)                  | `png`       |
 | `--aspect`    |       | Aspect ratio (Google)                             | `1:1`       |
 | `--count`     | `-n`  | Number of images                                  | `1`         |
+| `--input`     | `-i`  | Reference image path (repeatable)                 | -           |
+| `--mask`      |       | Mask image (alpha) for OpenAI inpainting          | -           |
 | `--open`      |       | Open the saved image                              | `false`     |
 | `--token`     |       | API key                                           | From env    |
 | `--help`      | `-h`  | Show help                                         | -           |
@@ -189,6 +214,8 @@ goimage --open "a desk setup with mechanical keyboard and ferns"
 | Quality control   | Yes (`low/medium/high`)| No                               | No                  |
 | Output formats    | PNG, JPEG, WebP        | PNG                              | PNG                 |
 | Multi-image (`n`) | Native (single request)| Looped (one per request)         | Native              |
+| Reference (`-i`)  | Yes (`/v1/images/edits`)| Yes (inlineData parts)          | Not supported       |
+| Mask (`--mask`)   | Yes (alpha channel)    | No                               | No                  |
 
 ## Scripting Examples
 
