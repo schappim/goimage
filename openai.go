@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -38,9 +41,6 @@ type openAIError struct {
 }
 
 func generateOpenAI(apiKey, model, prompt, size, quality, format string, count int, inputs []string, mask string) ([]generatedImage, error) {
-	if len(inputs) > 0 || mask != "" {
-		return nil, fmt.Errorf("openai reference-image support not yet wired in")
-	}
 	if size == "" {
 		size = defaultOpenAISize
 	}
@@ -57,9 +57,18 @@ func generateOpenAI(apiKey, model, prompt, size, quality, format string, count i
 		return nil, fmt.Errorf("invalid OpenAI format %q (expected png, jpeg, or webp)", format)
 	}
 
-	body, err := withRetry("openai", func() ([]byte, error) {
+	label := "openai"
+	call := func() ([]byte, error) {
 		return openAICall(apiKey, model, prompt, size, quality, format, count)
-	})
+	}
+	if len(inputs) > 0 || mask != "" {
+		label = "openai-edit"
+		call = func() ([]byte, error) {
+			return openAIEditCall(apiKey, model, prompt, size, quality, format, count, inputs, mask)
+		}
+	}
+
+	body, err := withRetry(label, call)
 	if err != nil {
 		return nil, err
 	}
@@ -96,6 +105,89 @@ func generateOpenAI(apiKey, model, prompt, size, quality, format string, count i
 		})
 	}
 	return out, nil
+}
+
+// openAIEditCall posts to /v1/images/edits as multipart/form-data with one or
+// more reference images (image[]) and an optional alpha-channel mask. Plain
+// generation parameters ride along as form fields.
+func openAIEditCall(apiKey, model, prompt, size, quality, format string, count int, inputs []string, mask string) ([]byte, error) {
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+
+	addField := func(name, value string) error {
+		if value == "" {
+			return nil
+		}
+		return mw.WriteField(name, value)
+	}
+	for _, kv := range []struct{ k, v string }{
+		{"model", model},
+		{"prompt", prompt},
+		{"size", size},
+		{"quality", quality},
+		{"output_format", format},
+		{"n", fmt.Sprintf("%d", count)},
+	} {
+		if err := addField(kv.k, kv.v); err != nil {
+			return nil, fmt.Errorf("write field %s: %w", kv.k, err)
+		}
+	}
+
+	for _, path := range inputs {
+		if err := attachFile(mw, "image[]", path); err != nil {
+			return nil, err
+		}
+	}
+	if mask != "" {
+		if err := attachFile(mw, "mask", mask); err != nil {
+			return nil, err
+		}
+	}
+	if err := mw.Close(); err != nil {
+		return nil, fmt.Errorf("close multipart writer: %w", err)
+	}
+
+	httpReq, err := http.NewRequest("POST", openAIEditsAPIURL, &buf)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", mw.FormDataContentType())
+	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+
+	client := &http.Client{Timeout: 300 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("http request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API error (%d): %s", resp.StatusCode, string(body))
+	}
+	return body, nil
+}
+
+// attachFile streams a file into a multipart writer using the file's basename.
+// The OpenAI API derives the MIME type from the filename extension, so the
+// name passed here matters.
+func attachFile(mw *multipart.Writer, field, path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", path, err)
+	}
+	defer f.Close()
+	fw, err := mw.CreateFormFile(field, filepath.Base(path))
+	if err != nil {
+		return fmt.Errorf("create form file for %s: %w", path, err)
+	}
+	if _, err := io.Copy(fw, f); err != nil {
+		return fmt.Errorf("copy %s into form: %w", path, err)
+	}
+	return nil
 }
 
 func openAICall(apiKey, model, prompt, size, quality, format string, count int) ([]byte, error) {

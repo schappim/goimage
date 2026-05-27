@@ -40,9 +40,10 @@ var initialBackoff = 1 * time.Second
 // Provider endpoint URLs. Declared as vars so tests can repoint them at an
 // httptest server without touching the calling code.
 var (
-	openAIAPIURL = "https://api.openai.com/v1/images/generations"
-	googleAPIURL = "https://generativelanguage.googleapis.com/v1beta/models"
-	grokAPIURL   = "https://api.x.ai/v1/images/generations"
+	openAIAPIURL      = "https://api.openai.com/v1/images/generations"
+	openAIEditsAPIURL = "https://api.openai.com/v1/images/edits"
+	googleAPIURL      = "https://generativelanguage.googleapis.com/v1beta/models"
+	grokAPIURL        = "https://api.x.ai/v1/images/generations"
 )
 
 // generatedImage is the common payload returned by every provider.
