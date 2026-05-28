@@ -766,3 +766,222 @@ func swapURL(target *string, replacement string) func(*testing.T) {
 		t.Cleanup(func() { *target = orig })
 	}
 }
+
+// ---------- OpenAI streaming (SSE) ----------
+
+// writeSSE writes a single Server-Sent Event frame: an event: line, a data:
+// line carrying compact JSON, and the blank-line terminator. Flushing after
+// each frame so the client side sees them as discrete events.
+func writeSSE(t *testing.T, w http.ResponseWriter, event string, payload any) {
+	t.Helper()
+	b, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal sse payload: %v", err)
+	}
+	if _, err := io.WriteString(w, "event: "+event+"\ndata: "+string(b)+"\n\n"); err != nil {
+		t.Fatalf("write sse: %v", err)
+	}
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func TestGenerateOpenAI_StreamingHappyPath(t *testing.T) {
+	var gotReq map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Accept"); got != "text/event-stream" {
+			t.Errorf("Accept header: want text/event-stream, got %q", got)
+		}
+		_ = json.NewDecoder(r.Body).Decode(&gotReq)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		writeSSE(t, w, "image_generation.partial_image", map[string]any{
+			"type":                "image_generation.partial_image",
+			"b64_json":            base64.StdEncoding.EncodeToString(tinyPNG),
+			"partial_image_index": 0,
+		})
+		writeSSE(t, w, "image_generation.partial_image", map[string]any{
+			"type":                "image_generation.partial_image",
+			"b64_json":            base64.StdEncoding.EncodeToString(tinyPNG),
+			"partial_image_index": 1,
+		})
+		writeSSE(t, w, "image_generation.completed", map[string]any{
+			"type":     "image_generation.completed",
+			"b64_json": base64.StdEncoding.EncodeToString(tinyPNG),
+		})
+	}))
+	defer srv.Close()
+	swapURL(&openAIAPIURL, srv.URL)(t)
+
+	var stderr bytes.Buffer
+	imgs, err := generateOpenAI("k", "gpt-image-2", "a cat", "1024x1024", "high", "png", 1, nil, "", true, &stderr)
+	if err != nil {
+		t.Fatalf("generateOpenAI streaming: %v", err)
+	}
+	if len(imgs) != 1 || !bytes.Equal(imgs[0].data, tinyPNG) || imgs[0].ext != "png" {
+		t.Fatalf("unexpected image result: %#v", imgs)
+	}
+	if gotReq["stream"] != true {
+		t.Fatalf("expected stream=true in request, got %v", gotReq)
+	}
+	if gotReq["partial_images"] == nil {
+		t.Fatalf("expected partial_images set, got %v", gotReq)
+	}
+
+	log := stderr.String()
+	if !strings.Contains(log, "openai: partial 1 received") {
+		t.Fatalf("missing partial 1 progress: %q", log)
+	}
+	if !strings.Contains(log, "openai: partial 2 received") {
+		t.Fatalf("missing partial 2 progress: %q", log)
+	}
+	if !strings.Contains(log, "openai: final image received") {
+		t.Fatalf("missing completion progress: %q", log)
+	}
+}
+
+func TestGenerateOpenAI_StreamFallsBackToJSONForCountGreaterOne(t *testing.T) {
+	var (
+		streamHits int
+		jsonHits   int
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The stream path sets Accept: text/event-stream; the JSON path
+		// does not. Distinguishing on the header is simpler than reading
+		// the body twice.
+		if r.Header.Get("Accept") == "text/event-stream" {
+			streamHits++
+			t.Errorf("stream path unexpectedly taken for count>1")
+			return
+		}
+		jsonHits++
+		resp := openAIResponse{Data: []openAIImageData{
+			{B64JSON: base64.StdEncoding.EncodeToString(tinyPNG)},
+			{B64JSON: base64.StdEncoding.EncodeToString(tinyPNG)},
+		}}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+	swapURL(&openAIAPIURL, srv.URL)(t)
+
+	imgs, err := generateOpenAI("k", "gpt-image-2", "x", "", "", "png", 2, nil, "", true, io.Discard)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(imgs) != 2 {
+		t.Fatalf("want 2 images, got %d", len(imgs))
+	}
+	if streamHits != 0 || jsonHits != 1 {
+		t.Fatalf("path hit counts off: stream=%d json=%d", streamHits, jsonHits)
+	}
+}
+
+func TestGenerateOpenAI_StreamMissingCompletedIsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		// Only a partial — no completed event.
+		writeSSE(t, w, "image_generation.partial_image", map[string]any{
+			"type":                "image_generation.partial_image",
+			"b64_json":            base64.StdEncoding.EncodeToString(tinyPNG),
+			"partial_image_index": 0,
+		})
+	}))
+	defer srv.Close()
+	swapURL(&openAIAPIURL, srv.URL)(t)
+
+	_, err := generateOpenAI("k", "gpt-image-2", "x", "", "", "png", 1, nil, "", true, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "without a completed event") {
+		t.Fatalf("expected missing-completed error, got %v", err)
+	}
+}
+
+func TestGenerateOpenAI_StreamAPIError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error":{"message":"bad key"}}`))
+	}))
+	defer srv.Close()
+	swapURL(&openAIAPIURL, srv.URL)(t)
+
+	_, err := generateOpenAI("k", "gpt-image-2", "x", "", "", "png", 1, nil, "", true, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "API error (401)") {
+		t.Fatalf("expected 401 surface from stream, got %v", err)
+	}
+}
+
+func TestGenerateOpenAI_StreamEditEndpointWithInput(t *testing.T) {
+	ref := writeTempPNG(t, "ref.png")
+
+	var (
+		gotInputs int
+		gotStream string
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+			t.Errorf("want multipart, got %q", r.Header.Get("Content-Type"))
+		}
+		if err := r.ParseMultipartForm(10 << 20); err != nil {
+			t.Fatalf("parse multipart: %v", err)
+		}
+		gotInputs = len(r.MultipartForm.File["image[]"])
+		gotStream = r.FormValue("stream")
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		writeSSE(t, w, "image_edit.partial_image", map[string]any{
+			"type":                "image_edit.partial_image",
+			"b64_json":            base64.StdEncoding.EncodeToString(tinyPNG),
+			"partial_image_index": 0,
+		})
+		writeSSE(t, w, "image_edit.completed", map[string]any{
+			"type":     "image_edit.completed",
+			"b64_json": base64.StdEncoding.EncodeToString(tinyPNG),
+		})
+	}))
+	defer srv.Close()
+	swapURL(&openAIEditsAPIURL, srv.URL)(t)
+
+	var stderr bytes.Buffer
+	imgs, err := generateOpenAI("k", "gpt-image-2", "edit it", "1024x1024", "high", "png", 1,
+		[]string{ref}, "", true, &stderr)
+	if err != nil {
+		t.Fatalf("edit stream: %v", err)
+	}
+	if len(imgs) != 1 {
+		t.Fatalf("want 1 image, got %d", len(imgs))
+	}
+	if gotInputs != 1 {
+		t.Fatalf("want 1 image[] upload, got %d", gotInputs)
+	}
+	if gotStream != "true" {
+		t.Fatalf("want stream=true form field, got %q", gotStream)
+	}
+	if !strings.Contains(stderr.String(), "openai-edit: partial 1 received") {
+		t.Fatalf("missing edit-stream progress: %q", stderr.String())
+	}
+}
+
+func TestGenerateOpenAI_StreamDisabledTakesJSONPath(t *testing.T) {
+	hit := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit++
+		if r.Header.Get("Accept") == "text/event-stream" {
+			t.Errorf("stream path taken when --stream=false")
+		}
+		resp := openAIResponse{Data: []openAIImageData{
+			{B64JSON: base64.StdEncoding.EncodeToString(tinyPNG)},
+		}}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+	swapURL(&openAIAPIURL, srv.URL)(t)
+
+	imgs, err := generateOpenAI("k", "gpt-image-2", "x", "", "", "png", 1, nil, "", false, io.Discard)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(imgs) != 1 || hit != 1 {
+		t.Fatalf("unexpected: imgs=%d hit=%d", len(imgs), hit)
+	}
+}
