@@ -9,6 +9,7 @@ A self-contained command-line tool for image generation using OpenAI (GPT Image)
 - **Reference input images** (`-i`) for image-to-image / edits on OpenAI and Google
 - **Mask support** (`--mask`) for OpenAI inpainting
 - **Automatic retries** - up to 3 attempts per request with exponential backoff
+- **Streaming progress** - OpenAI partial-image events surface on stderr as the model renders (`--stream`, default on)
 - Provider-native model defaults and overrides
 - Prompt from arguments or stdin (great for piping)
 - Save to PNG, JPEG, or WebP (where the provider supports it)
@@ -200,6 +201,7 @@ goimage --open "a desk setup with mechanical keyboard and ferns"
 | `--count`     | `-n`  | Number of images                                  | `1`         |
 | `--input`     | `-i`  | Reference image path (repeatable)                 | -           |
 | `--mask`      |       | Mask image (alpha) for OpenAI inpainting          | -           |
+| `--stream`    |       | Stream OpenAI partial-image events to stderr      | `true`      |
 | `--open`      |       | Open the saved image                              | `false`     |
 | `--token`     |       | API key                                           | From env    |
 | `--help`      | `-h`  | Show help                                         | -           |
@@ -249,6 +251,29 @@ goimage -p grok   -o grok.png   "$prompt"
 goimage -n 9 -o variant.png "isometric pixel art of a fountain"
 # variant-1.png .. variant-9.png
 ```
+
+## Streaming Progress (OpenAI)
+
+When the OpenAI provider is in use and `-n 1`, `goimage` opens an SSE
+connection (`stream=true`, `partial_images=2`) and surfaces progress on
+stderr as the model renders:
+
+```
+$ goimage "a watercolor of a fox in autumn leaves"
+openai: partial 1 received (3.2s)
+openai: partial 2 received (8.4s)
+openai: final image received (11.9s)
+goimage-openai-20260528-104812.png
+```
+
+stdout still only carries the final file path, so pipelines keep working
+unchanged. Pass `--stream=false` to fall back to the non-streaming JSON
+endpoint (e.g. when scripting and you don't want progress lines).
+Streaming is automatically disabled for multi-image runs (`-n 2+`)
+because the SSE API returns a single final image.
+
+Google and Grok don't expose partial-image streaming, so `--stream` is a
+no-op for those providers.
 
 ## Reliability
 

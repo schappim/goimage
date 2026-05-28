@@ -199,6 +199,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  -n, --count      Number of images to generate (default: 1)\n")
 	fmt.Fprintf(w, "  -i, --input      Reference image path (repeatable) for image-to-image / edit\n")
 	fmt.Fprintf(w, "      --mask       Mask image (alpha channel) for OpenAI inpainting\n")
+	fmt.Fprintf(w, "      --stream     Stream partial image progress to stderr, OpenAI only (default: true; --stream=false to disable)\n")
 	fmt.Fprintf(w, "      --open       Open the saved image in your default viewer\n")
 	fmt.Fprintf(w, "      --token      API key (or set provider env var)\n")
 	fmt.Fprintf(w, "  -h, --help       Show this help message\n\n")
