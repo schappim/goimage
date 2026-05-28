@@ -502,7 +502,7 @@ func TestRun_ReadsPromptFromStdin(t *testing.T) {
 	swapURL(&openAIAPIURL, srv.URL)(t)
 
 	var stdout, stderr bytes.Buffer
-	code := run(nil, strings.NewReader("a sunset"), &stdout, &stderr,
+	code := run([]string{"--stream=false"}, strings.NewReader("a sunset"), &stdout, &stderr,
 		envMap(map[string]string{"OPENAI_API_KEY": "k"}))
 	if code != 0 {
 		t.Fatalf("want exit 0, got %d (stderr=%s)", code, stderr.String())
@@ -534,7 +534,7 @@ func TestRun_WritesToExplicitOutputPath(t *testing.T) {
 	swapURL(&openAIAPIURL, srv.URL)(t)
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-o", target, "a cat"}, strings.NewReader(""), &stdout, &stderr,
+	code := run([]string{"--stream=false", "-o", target, "a cat"}, strings.NewReader(""), &stdout, &stderr,
 		envMap(map[string]string{"OPENAI_API_KEY": "k"}))
 	if code != 0 {
 		t.Fatalf("want exit 0, got %d (stderr=%s)", code, stderr.String())
@@ -583,7 +583,7 @@ func TestRun_OpenFlagCallsOpenImageFn(t *testing.T) {
 	defer func() { openImageFn = origOpen }()
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"--open", "hi"}, strings.NewReader(""), &stdout, &stderr,
+	code := run([]string{"--stream=false", "--open", "hi"}, strings.NewReader(""), &stdout, &stderr,
 		envMap(map[string]string{"OPENAI_API_KEY": "k"}))
 	if code != 0 {
 		t.Fatalf("want exit 0, got %d (stderr=%s)", code, stderr.String())

@@ -41,9 +41,6 @@ type openAIError struct {
 }
 
 func generateOpenAI(apiKey, model, prompt, size, quality, format string, count int, inputs []string, mask string, stream bool, stderr io.Writer) ([]generatedImage, error) {
-	// Suppress unused warnings until openai_stream.go wires these in.
-	_ = stream
-	_ = stderr
 
 	if size == "" {
 		size = defaultOpenAISize
@@ -59,6 +56,25 @@ func generateOpenAI(apiKey, model, prompt, size, quality, format string, count i
 	case "png", "jpeg", "webp":
 	default:
 		return nil, fmt.Errorf("invalid OpenAI format %q (expected png, jpeg, or webp)", format)
+	}
+
+	// Streaming path: only meaningful for single-image requests. The SSE
+	// schema returns one final image regardless of n, so anything > 1 falls
+	// back to the JSON endpoint to preserve current behaviour.
+	if stream && count == 1 {
+		var (
+			img generatedImage
+			err error
+		)
+		if len(inputs) > 0 || mask != "" {
+			img, err = openAIEditStreamCall(apiKey, model, prompt, size, quality, format, inputs, mask, stderr)
+		} else {
+			img, err = openAIStreamCall(apiKey, model, prompt, size, quality, format, stderr)
+		}
+		if err != nil {
+			return nil, err
+		}
+		return []generatedImage{img}, nil
 	}
 
 	label := "openai"
