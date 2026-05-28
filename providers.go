@@ -29,6 +29,10 @@ const (
 
 	defaultCount = 1
 
+	// OpenAI partial-image streaming. Two intermediate snapshots strikes a
+	// balance between perceived progress and extra base64 bytes on the wire.
+	defaultOpenAIPartialImages = 2
+
 	// Number of attempts per generation before giving up.
 	maxRetries = 3
 )

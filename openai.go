@@ -40,7 +40,11 @@ type openAIError struct {
 	Message string `json:"message"`
 }
 
-func generateOpenAI(apiKey, model, prompt, size, quality, format string, count int, inputs []string, mask string) ([]generatedImage, error) {
+func generateOpenAI(apiKey, model, prompt, size, quality, format string, count int, inputs []string, mask string, stream bool, stderr io.Writer) ([]generatedImage, error) {
+	// Suppress unused warnings until openai_stream.go wires these in.
+	_ = stream
+	_ = stderr
+
 	if size == "" {
 		size = defaultOpenAISize
 	}

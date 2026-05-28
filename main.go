@@ -51,6 +51,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 		help     bool
 		inputs   stringSlice
 		mask     string
+		stream   bool
 	)
 
 	fs := flag.NewFlagSet("goimage", flag.ContinueOnError)
@@ -74,6 +75,9 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 	fs.Var(&inputs, "input", "Reference image path (repeatable) for image-to-image / edit")
 	fs.Var(&inputs, "i", "Reference image path (shorthand, repeatable)")
 	fs.StringVar(&mask, "mask", "", "Mask image (alpha channel) for OpenAI inpainting")
+	// --stream defaults to true. Currently only OpenAI surfaces progress;
+	// Google and Grok ignore the flag because their APIs don't stream partials.
+	fs.BoolVar(&stream, "stream", true, "Stream partial image progress to stderr (OpenAI only)")
 	fs.StringVar(&token, "token", "", "API key for the provider")
 	fs.BoolVar(&help, "help", false, "Show help")
 	fs.BoolVar(&help, "h", false, "Show help (shorthand)")
@@ -147,7 +151,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 		return 1
 	}
 
-	images, err := generate(provider, apiKey, model, prompt, size, quality, format, aspect, count, inputs, mask, stderr)
+	images, err := generate(provider, apiKey, model, prompt, size, quality, format, aspect, count, inputs, mask, stream, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "Error generating image: %v\n", err)
 		return 1
@@ -225,11 +229,12 @@ func printUsage(w io.Writer) {
 }
 
 // generate dispatches to the requested provider. Kept as its own seam so each
-// provider's signature can vary while run() stays small.
-func generate(provider, apiKey, model, prompt, size, quality, format, aspect string, count int, inputs []string, mask string, stderr io.Writer) ([]generatedImage, error) {
+// provider's signature can vary while run() stays small. stream toggles
+// progress streaming on supported providers (OpenAI today).
+func generate(provider, apiKey, model, prompt, size, quality, format, aspect string, count int, inputs []string, mask string, stream bool, stderr io.Writer) ([]generatedImage, error) {
 	switch provider {
 	case "openai":
-		return generateOpenAI(apiKey, model, prompt, size, quality, format, count, inputs, mask)
+		return generateOpenAI(apiKey, model, prompt, size, quality, format, count, inputs, mask, stream, stderr)
 	case "google":
 		return generateGoogle(apiKey, model, prompt, aspect, count, inputs)
 	case "grok":

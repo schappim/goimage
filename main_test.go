@@ -196,7 +196,7 @@ func TestGenerateOpenAI_HappyPath(t *testing.T) {
 
 	swapURL(&openAIAPIURL, srv.URL)(t)
 
-	imgs, err := generateOpenAI("test-key", "gpt-image-1", "a cat", "1024x1024", "high", "png", 1, nil, "")
+	imgs, err := generateOpenAI("test-key", "gpt-image-1", "a cat", "1024x1024", "high", "png", 1, nil, "", false, io.Discard)
 	if err != nil {
 		t.Fatalf("generateOpenAI: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestGenerateOpenAI_JpegMapsToJpgExt(t *testing.T) {
 	defer srv.Close()
 	swapURL(&openAIAPIURL, srv.URL)(t)
 
-	imgs, err := generateOpenAI("k", "gpt-image-1", "x", "", "", "jpeg", 1, nil, "")
+	imgs, err := generateOpenAI("k", "gpt-image-1", "x", "", "", "jpeg", 1, nil, "", false, io.Discard)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestGenerateOpenAI_JpegMapsToJpgExt(t *testing.T) {
 }
 
 func TestGenerateOpenAI_InvalidFormatRejected(t *testing.T) {
-	_, err := generateOpenAI("k", "gpt-image-1", "x", "", "", "bmp", 1, nil, "")
+	_, err := generateOpenAI("k", "gpt-image-1", "x", "", "", "bmp", 1, nil, "", false, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "invalid OpenAI format") {
 		t.Fatalf("expected format validation error, got %v", err)
 	}
@@ -255,7 +255,7 @@ func TestGenerateOpenAI_APIErrorSurfaces(t *testing.T) {
 	defer srv.Close()
 	swapURL(&openAIAPIURL, srv.URL)(t)
 
-	_, err := generateOpenAI("k", "gpt-image-1", "x", "", "", "png", 1, nil, "")
+	_, err := generateOpenAI("k", "gpt-image-1", "x", "", "", "png", 1, nil, "", false, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "API error (401)") {
 		t.Fatalf("expected 401 surface, got %v", err)
 	}
@@ -644,7 +644,7 @@ func TestGenerateOpenAI_EditWithInputsAndMask(t *testing.T) {
 	swapURL(&openAIEditsAPIURL, srv.URL)(t)
 
 	imgs, err := generateOpenAI("k", "gpt-image-2", "swap the sky", "1024x1024", "high", "png", 1,
-		[]string{in1, in2}, maskPath)
+		[]string{in1, in2}, maskPath, false, io.Discard)
 	if err != nil {
 		t.Fatalf("generateOpenAI (edit): %v", err)
 	}
@@ -667,7 +667,7 @@ func TestGenerateOpenAI_EditWithInputsAndMask(t *testing.T) {
 
 func TestGenerateOpenAI_EditMissingInputFails(t *testing.T) {
 	_, err := generateOpenAI("k", "gpt-image-2", "x", "", "", "png", 1,
-		[]string{"/nonexistent/ref.png"}, "")
+		[]string{"/nonexistent/ref.png"}, "", false, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "open /nonexistent/ref.png") {
 		t.Fatalf("expected missing-file error, got %v", err)
 	}
