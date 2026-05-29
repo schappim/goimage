@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -173,6 +175,68 @@ func TestWithRetry_GivesUpAfterMaxRetries(t *testing.T) {
 	}
 	if calls != maxRetries {
 		t.Fatalf("want %d calls, got %d", maxRetries, calls)
+	}
+}
+
+// fakeNetTimeout is a net.Error whose Timeout() is true, standing in for the
+// *url.Error a real client-side deadline produces.
+type fakeNetTimeout struct{}
+
+func (fakeNetTimeout) Error() string   { return "i/o timeout" }
+func (fakeNetTimeout) Timeout() bool   { return true }
+func (fakeNetTimeout) Temporary() bool { return true }
+
+func TestIsTimeout_ClassifiesByType(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"context deadline", context.DeadlineExceeded, true},
+		{"wrapped context deadline", fmt.Errorf("http request: %w", context.DeadlineExceeded), true},
+		{"net.Error timeout", fakeNetTimeout{}, true},
+		{"wrapped net.Error timeout", fmt.Errorf("http request: %w", fakeNetTimeout{}), true},
+		{"plain error", errors.New("nope"), false},
+		{"api 400", errors.New("API error (400): bad prompt"), false},
+		{"nil", nil, false},
+	}
+	for _, tc := range cases {
+		if got := isTimeout(tc.err); got != tc.want {
+			t.Errorf("%s: isTimeout = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// A client-side timeout must NOT be retried: re-running the identical request
+// with the same deadline can only fail the same way and wastes minutes.
+func TestWithRetry_DoesNotRetryTimeout(t *testing.T) {
+	orig := initialBackoff
+	initialBackoff = time.Millisecond
+	defer func() { initialBackoff = orig }()
+
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"context deadline", fmt.Errorf("http request: %w", context.DeadlineExceeded)},
+		{"net timeout", fmt.Errorf("http request: %w", fakeNetTimeout{})},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			_, err := withRetry("test", func() ([]byte, error) {
+				calls++
+				return nil, tc.err
+			})
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if calls != 1 {
+				t.Fatalf("timeout must not be retried: want 1 call, got %d", calls)
+			}
+			if !isTimeout(err) {
+				t.Fatalf("returned error should still unwrap to a timeout, got %v", err)
+			}
+		})
 	}
 }
 

@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -78,8 +81,28 @@ func decodeB64(s string) ([]byte, error) {
 	return base64.StdEncoding.DecodeString(s)
 }
 
+// isTimeout reports whether err is a client-side deadline/timeout — i.e. we
+// gave up before the server responded — as opposed to an API rejection or a
+// transient network blip. Typed inspection only, never string matching:
+// context.DeadlineExceeded covers our context.WithTimeout deadline, and the
+// net.Error.Timeout() interface (which *url.Error unwraps to) is the backstop.
+func isTimeout(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var ne net.Error
+	if errors.As(err, &ne) {
+		return ne.Timeout()
+	}
+	return false
+}
+
 // withRetry retries fn up to maxRetries times with exponential backoff.
-// The label is used for log messages so the user can see which attempt is retrying.
+// The label is used for log messages so the user can see which attempt is
+// retrying. A client-side timeout is the exception: re-issuing the identical
+// request with the same deadline can only fail the same way, so we surface it
+// immediately rather than burning another full timeout (and misleading the
+// user with "retrying in 1s" lines) on a doomed attempt.
 func withRetry(label string, fn func() ([]byte, error)) ([]byte, error) {
 	var lastErr error
 	backoff := initialBackoff
@@ -89,6 +112,9 @@ func withRetry(label string, fn func() ([]byte, error)) ([]byte, error) {
 			return data, nil
 		}
 		lastErr = err
+		if isTimeout(err) {
+			return nil, fmt.Errorf("%s timed out after %v: %w", label, httpTimeout, err)
+		}
 		if attempt < maxRetries {
 			fmt.Fprintf(os.Stderr, "%s: attempt %d/%d failed: %v (retrying in %v)\n",
 				label, attempt, maxRetries, err, backoff)
