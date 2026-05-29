@@ -41,6 +41,14 @@ const (
 // rather than a const so tests can swap it in for fast-running retry tests.
 var initialBackoff = 1 * time.Second
 
+// httpTimeout is the single source of truth for how long any provider request
+// may run. Applied as a context deadline (not http.Client.Timeout) so it
+// covers the whole call — dial, the model's server-side render time, and the
+// response read — while a slow render is still allowed to finish. Image models
+// legitimately take minutes, so the default is generous; the --timeout flag
+// overrides it. Declared as a var so the flag and tests can swap it.
+var httpTimeout = 300 * time.Second
+
 // Provider endpoint URLs. Declared as vars so tests can repoint them at an
 // httptest server without touching the calling code.
 var (

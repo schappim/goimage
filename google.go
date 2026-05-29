@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -10,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 // googleRequest is the body POSTed to
@@ -196,14 +196,17 @@ func googleCall(apiKey, model, prompt, aspect string, refParts []googlePart) ([]
 	}
 
 	url := fmt.Sprintf("%s/%s:generateContent", googleAPIURL, model)
-	httpReq, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+	ctx, cancel := context.WithTimeout(context.Background(), httpTimeout)
+	defer cancel()
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("x-goog-api-key", apiKey)
 
-	client := &http.Client{Timeout: 180 * time.Second}
+	// No http.Client.Timeout: the context deadline above governs the whole call.
+	client := &http.Client{}
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("http request: %w", err)

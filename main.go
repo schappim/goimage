@@ -52,6 +52,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 		inputs   stringSlice
 		mask     string
 		stream   bool
+		timeout  time.Duration
 	)
 
 	fs := flag.NewFlagSet("goimage", flag.ContinueOnError)
@@ -78,6 +79,9 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 	// --stream defaults to true. Currently only OpenAI surfaces progress;
 	// Google and Grok ignore the flag because their APIs don't stream partials.
 	fs.BoolVar(&stream, "stream", true, "Stream partial image progress to stderr (OpenAI only)")
+	// Image models can legitimately take minutes; the default deadline is
+	// generous and configurable so slow renders aren't cut off mid-flight.
+	fs.DurationVar(&timeout, "timeout", httpTimeout, "Max time to wait for the provider, e.g. 300s, 10m")
 	fs.StringVar(&token, "token", "", "API key for the provider")
 	fs.BoolVar(&help, "help", false, "Show help")
 	fs.BoolVar(&help, "h", false, "Show help (shorthand)")
@@ -128,6 +132,12 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 		fmt.Fprintln(stderr, "Error: --count must be >= 1")
 		return 1
 	}
+
+	if timeout <= 0 {
+		fmt.Fprintln(stderr, "Error: --timeout must be > 0 (e.g. 300s, 10m)")
+		return 1
+	}
+	httpTimeout = timeout
 
 	var prompt string
 	if fs.NArg() > 0 {
@@ -200,6 +210,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  -i, --input      Reference image path (repeatable) for image-to-image / edit\n")
 	fmt.Fprintf(w, "      --mask       Mask image (alpha channel) for OpenAI inpainting\n")
 	fmt.Fprintf(w, "      --stream     Stream partial image progress to stderr, OpenAI only (default: true; --stream=false to disable)\n")
+	fmt.Fprintf(w, "      --timeout    Max time to wait for the provider, e.g. 300s, 10m (default: 5m)\n")
 	fmt.Fprintf(w, "      --open       Open the saved image in your default viewer\n")
 	fmt.Fprintf(w, "      --token      API key (or set provider env var)\n")
 	fmt.Fprintf(w, "  -h, --help       Show this help message\n\n")

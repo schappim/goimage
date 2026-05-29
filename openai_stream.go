@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -51,7 +52,9 @@ func openAIStreamCall(apiKey, model, prompt, size, quality, format string, stder
 		return generatedImage{}, fmt.Errorf("marshal request: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", openAIAPIURL, bytes.NewReader(body))
+	ctx, cancel := context.WithTimeout(context.Background(), httpTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "POST", openAIAPIURL, bytes.NewReader(body))
 	if err != nil {
 		return generatedImage{}, fmt.Errorf("create request: %w", err)
 	}
@@ -101,7 +104,9 @@ func openAIEditStreamCall(apiKey, model, prompt, size, quality, format string, i
 		return generatedImage{}, fmt.Errorf("close multipart writer: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", openAIEditsAPIURL, &buf)
+	ctx, cancel := context.WithTimeout(context.Background(), httpTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "POST", openAIEditsAPIURL, &buf)
 	if err != nil {
 		return generatedImage{}, fmt.Errorf("create request: %w", err)
 	}
@@ -115,7 +120,9 @@ func openAIEditStreamCall(apiKey, model, prompt, size, quality, format string, i
 // doStream runs an SSE request to completion, logging partial-image events to
 // stderr as they arrive and returning the final image bytes.
 func doStream(req *http.Request, label, format string, stderr io.Writer) (generatedImage, error) {
-	client := &http.Client{Timeout: 300 * time.Second}
+	// The request already carries a context deadline (httpTimeout) set by the
+	// caller, so the client itself needs no separate Timeout.
+	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
 		return generatedImage{}, fmt.Errorf("http request: %w", err)

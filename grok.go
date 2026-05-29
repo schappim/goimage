@@ -2,11 +2,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"time"
 )
 
 // grokRequest is the body POSTed to api.x.ai/v1/images/generations. The
@@ -87,14 +87,17 @@ func grokCall(apiKey, model, prompt string, count int) ([]byte, error) {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequest("POST", grokAPIURL, bytes.NewBuffer(jsonData))
+	ctx, cancel := context.WithTimeout(context.Background(), httpTimeout)
+	defer cancel()
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", grokAPIURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 
-	client := &http.Client{Timeout: 180 * time.Second}
+	// No http.Client.Timeout: the context deadline above governs the whole call.
+	client := &http.Client{}
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("http request: %w", err)

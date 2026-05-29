@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 // openAIRequest is the body POSTed to /v1/images/generations for gpt-image-*
@@ -167,14 +167,18 @@ func openAIEditCall(apiKey, model, prompt, size, quality, format string, count i
 		return nil, fmt.Errorf("close multipart writer: %w", err)
 	}
 
-	httpReq, err := http.NewRequest("POST", openAIEditsAPIURL, &buf)
+	ctx, cancel := context.WithTimeout(context.Background(), httpTimeout)
+	defer cancel()
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", openAIEditsAPIURL, &buf)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", mw.FormDataContentType())
 	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 
-	client := &http.Client{Timeout: 300 * time.Second}
+	// No http.Client.Timeout: the context deadline above governs the whole
+	// call so a long-but-progressing render isn't cut off mid-flight.
+	client := &http.Client{}
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("http request: %w", err)
@@ -224,14 +228,18 @@ func openAICall(apiKey, model, prompt, size, quality, format string, count int) 
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequest("POST", openAIAPIURL, bytes.NewBuffer(jsonData))
+	ctx, cancel := context.WithTimeout(context.Background(), httpTimeout)
+	defer cancel()
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", openAIAPIURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 
-	client := &http.Client{Timeout: 180 * time.Second}
+	// No http.Client.Timeout: the context deadline above governs the whole
+	// call so a long-but-progressing render isn't cut off mid-flight.
+	client := &http.Client{}
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("http request: %w", err)
