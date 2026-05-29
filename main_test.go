@@ -830,14 +830,14 @@ func TestRun_MaskWithoutInputIsError(t *testing.T) {
 
 func TestMimeFromExt(t *testing.T) {
 	cases := map[string]string{
-		"a.png":   "image/png",
-		"a.JPG":   "image/jpeg",
-		"a.jpeg":  "image/jpeg",
-		"a.webp":  "image/webp",
-		"a.gif":   "image/gif",
-		"a.bmp":   "image/png",
-		"no-ext":  "image/png",
-		"x.tIfF":  "image/png",
+		"a.png":  "image/png",
+		"a.JPG":  "image/jpeg",
+		"a.jpeg": "image/jpeg",
+		"a.webp": "image/webp",
+		"a.gif":  "image/gif",
+		"a.bmp":  "image/png",
+		"no-ext": "image/png",
+		"x.tIfF": "image/png",
 	}
 	for in, want := range cases {
 		if got := mimeFromExt(in); got != want {
