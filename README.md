@@ -8,7 +8,9 @@ A self-contained command-line tool for image generation using OpenAI (GPT Image)
 - **Single binary** - written in pure Go, no Python, no node, no ffmpeg
 - **Reference input images** (`-i`) for image-to-image / edits on OpenAI and Google
 - **Mask support** (`--mask`) for OpenAI inpainting
-- **Automatic retries** - up to 3 attempts per request with exponential backoff
+- **Automatic retries** - transient network/upstream blips retried up to 3 times with exponential backoff (a client-side timeout is reported immediately, not retried)
+- **Configurable timeout** - `--timeout` sets a single deadline (default 5m) applied as a context deadline, so slow renders aren't cut off mid-flight
+- **Actionable errors** - a timeout or connectivity failure is explained in plain language with what to try next, instead of a raw Go transport string
 - **Streaming progress** - OpenAI partial-image events surface on stderr as the model renders (`--stream`, default on)
 - Provider-native model defaults and overrides
 - Prompt from arguments or stdin (great for piping)
@@ -202,6 +204,7 @@ goimage --open "a desk setup with mechanical keyboard and ferns"
 | `--input`     | `-i`  | Reference image path (repeatable)                 | -           |
 | `--mask`      |       | Mask image (alpha) for OpenAI inpainting          | -           |
 | `--stream`    |       | Stream OpenAI partial-image events to stderr      | `true`      |
+| `--timeout`   |       | Max wait for the provider, e.g. `300s`, `10m`     | `5m`        |
 | `--open`      |       | Open the saved image                              | `false`     |
 | `--token`     |       | API key                                           | From env    |
 | `--help`      | `-h`  | Show help                                         | -           |
@@ -277,7 +280,11 @@ no-op for those providers.
 
 ## Reliability
 
-Each provider call is retried up to 3 times with exponential backoff (1s, 2s, 4s). Transient timeouts and upstream blips no longer require a manual rerun. Failures are reported on stderr; the final file path is written to stdout so you can pipe it into other tools.
+Transient failures — network blips and 5xx upstream errors — are retried up to 3 times with exponential backoff (1s, 2s, 4s), so they don't require a manual rerun.
+
+A **client-side timeout** is treated differently. Every request runs under a single deadline (`--timeout`, default 5m) applied as a context deadline that covers the whole call, including the model's render time. If that deadline fires the model was almost certainly still rendering, and re-issuing the identical request would only fail the same way — so goimage reports it immediately (no wasted retries) with guidance: raise `--timeout`, lower `--quality`, use `--stream` to watch progress, or simplify the prompt. Image models can legitimately take minutes, especially at high quality, so prefer a generous `--timeout` over expecting a fixed ceiling.
+
+Failures are reported on stderr; the final file path is written to stdout so you can pipe it into other tools.
 
 ## Error Handling
 
@@ -290,6 +297,20 @@ Error: XAI_API_KEY environment variable not set and --token not provided
 Error: Invalid provider 'midjourney'. Use 'openai', 'google', or 'grok'
 Error: --count must be >= 1
 Error: invalid OpenAI format "bmp" (expected png, jpeg, or webp)
+Error: --timeout must be > 0 (e.g. 300s, 10m)
+```
+
+A client-side timeout is reported with guidance rather than a raw transport error:
+
+```
+Error generating image: the request timed out after 5m0s before the provider responded.
+The image model was most likely still rendering — this is a client-side
+deadline, not an API rejection, and re-running the same command unchanged
+will hit the same deadline. Try one of:
+  - give it longer:      --timeout 10m
+  - make it cheaper:     --quality low   (or medium)
+  - watch live progress: --stream        (on by default for a single image)
+  - simplify the prompt, or lower --count
 ```
 
 ## Help
