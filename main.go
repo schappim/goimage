@@ -163,7 +163,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 
 	images, err := generate(provider, apiKey, model, prompt, size, quality, format, aspect, count, inputs, mask, stream, stderr)
 	if err != nil {
-		fmt.Fprintf(stderr, "Error generating image: %v\n", err)
+		fmt.Fprintf(stderr, "Error generating image: %s\n", explainError(err))
 		return 1
 	}
 	if len(images) == 0 {

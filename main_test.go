@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -237,6 +238,31 @@ func TestWithRetry_DoesNotRetryTimeout(t *testing.T) {
 				t.Fatalf("returned error should still unwrap to a timeout, got %v", err)
 			}
 		})
+	}
+}
+
+func TestExplainError(t *testing.T) {
+	// A timeout becomes multi-line guidance naming the knobs the user can turn.
+	timeoutMsg := explainError(fmt.Errorf("http request: %w", context.DeadlineExceeded))
+	for _, want := range []string{"timed out", "--timeout", "--quality", "--stream", "--count"} {
+		if !strings.Contains(timeoutMsg, want) {
+			t.Errorf("timeout guidance is missing %q in:\n%s", want, timeoutMsg)
+		}
+	}
+
+	// A DNS failure points at connectivity, not the model.
+	dnsMsg := explainError(&net.DNSError{Name: "api.openai.com", Err: "no such host"})
+	if !strings.Contains(dnsMsg, "resolve") || !strings.Contains(dnsMsg, "api.openai.com") {
+		t.Errorf("DNS guidance unexpected:\n%s", dnsMsg)
+	}
+
+	// Anything we don't recognise passes through unchanged (no false advice).
+	plain := errors.New("api error: content policy violation")
+	if got := explainError(plain); got != plain.Error() {
+		t.Errorf("unrecognised error should pass through verbatim, got %q", got)
+	}
+	if got := explainError(nil); got != "" {
+		t.Errorf("nil error should explain to empty string, got %q", got)
 	}
 }
 

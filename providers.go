@@ -97,6 +97,47 @@ func isTimeout(err error) bool {
 	return false
 }
 
+// explainError turns a low-level failure into actionable, human-readable
+// guidance whenever we can recognise it by type (never by string matching),
+// falling back to the raw error otherwise. It exists so the single
+// user-facing error line isn't a cryptic Go transport string like "context
+// deadline exceeded (Client.Timeout exceeded while awaiting headers)" with no
+// path forward — the user should be told what happened and what to try.
+func explainError(err error) string {
+	if err == nil {
+		return ""
+	}
+	switch {
+	case isTimeout(err):
+		return fmt.Sprintf(
+			"the request timed out after %v before the provider responded.\n"+
+				"The image model was most likely still rendering — this is a client-side\n"+
+				"deadline, not an API rejection, and re-running the same command unchanged\n"+
+				"will hit the same deadline. Try one of:\n"+
+				"  - give it longer:      --timeout 10m\n"+
+				"  - make it cheaper:     --quality low   (or medium)\n"+
+				"  - watch live progress: --stream        (on by default for a single image)\n"+
+				"  - simplify the prompt, or lower --count\n"+
+				"(underlying error: %v)", httpTimeout, err)
+	}
+
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return fmt.Sprintf(
+			"could not resolve the provider's hostname (%s).\n"+
+				"Check your internet connection, DNS, or any proxy/VPN.\n"+
+				"(underlying error: %v)", dnsErr.Name, err)
+	}
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		return fmt.Sprintf(
+			"could not reach the provider (network error while trying to %s).\n"+
+				"Check your internet connection, firewall, or proxy/VPN settings.\n"+
+				"(underlying error: %v)", opErr.Op, err)
+	}
+	return err.Error()
+}
+
 // withRetry retries fn up to maxRetries times with exponential backoff.
 // The label is used for log messages so the user can see which attempt is
 // retrying. A client-side timeout is the exception: re-issuing the identical
