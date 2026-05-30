@@ -195,7 +195,7 @@ func openAIEditCall(apiKey, model, prompt, size, quality, format string, count i
 		return nil, fmt.Errorf("read response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API error (%d): %s", resp.StatusCode, string(body))
+		return nil, apiError(resp.StatusCode, body)
 	}
 	return body, nil
 }
@@ -264,7 +264,7 @@ func openAICall(apiKey, model, prompt, size, quality, format string, count int) 
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API error (%d): %s", resp.StatusCode, string(body))
+		return nil, apiError(resp.StatusCode, body)
 	}
 	return body, nil
 }

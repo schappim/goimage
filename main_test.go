@@ -266,6 +266,32 @@ func TestExplainError(t *testing.T) {
 	}
 }
 
+func TestAPIError(t *testing.T) {
+	// A Cloudflare-style HTML error page collapses to a short summary instead
+	// of dumping a screenful of markup, while keeping the "API error (NNN)" tag.
+	html := []byte("<!DOCTYPE html>\n<html><head><title>520</title></head><body>...lots of markup...</body></html>")
+	got := apiError(520, html).Error()
+	if !strings.Contains(got, "API error (520)") {
+		t.Errorf("status tag missing: %q", got)
+	}
+	if strings.Contains(got, "<title>") || strings.Contains(got, "<html") {
+		t.Errorf("raw HTML leaked into message: %q", got)
+	}
+	if !strings.Contains(got, "transient") {
+		t.Errorf("HTML body should hint that it's transient: %q", got)
+	}
+
+	// A short JSON error passes through so real API messages stay visible.
+	if got := apiError(401, []byte(`{"error":"invalid api key"}`)).Error(); !strings.Contains(got, "API error (401)") || !strings.Contains(got, "invalid api key") {
+		t.Errorf("short body should pass through: %q", got)
+	}
+
+	// An over-long body is truncated rather than flooding the terminal.
+	if got := apiError(500, []byte(strings.Repeat("x", 800))).Error(); !strings.Contains(got, "truncated") || len(got) > 400 {
+		t.Errorf("long body not truncated (len=%d): %q", len(got), got)
+	}
+}
+
 // ---------- OpenAI provider ----------
 
 func TestGenerateOpenAI_HappyPath(t *testing.T) {

@@ -131,7 +131,7 @@ func doStream(req *http.Request, label, format string, stderr io.Writer) (genera
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return generatedImage{}, fmt.Errorf("API error (%d): %s", resp.StatusCode, string(body))
+		return generatedImage{}, apiError(resp.StatusCode, body)
 	}
 
 	ext := format

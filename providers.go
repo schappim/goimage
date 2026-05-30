@@ -138,6 +138,24 @@ func explainError(err error) string {
 	return err.Error()
 }
 
+// apiError formats a non-2xx provider response into a concise error. Some edge
+// layers (Cloudflare on a 5xx, for example) return a full HTML page instead of
+// JSON; echoing that verbatim buries the signal under a screenful of markup, so
+// collapse HTML and over-long bodies into a short summary. Detection is
+// structural only (doctype/tag, length) — not semantic string matching.
+func apiError(status int, body []byte) error {
+	msg := strings.TrimSpace(string(body))
+	switch low := strings.ToLower(msg); {
+	case msg == "":
+		msg = "(empty response body)"
+	case strings.HasPrefix(low, "<!doctype"), strings.HasPrefix(low, "<html"), strings.Contains(low, "<html"):
+		msg = "provider returned an HTML error page instead of JSON — usually a transient upstream/proxy error, try again in a moment"
+	case len(msg) > 300:
+		msg = msg[:300] + "… (truncated)"
+	}
+	return fmt.Errorf("API error (%d): %s", status, msg)
+}
+
 // withRetry retries fn up to maxRetries times with exponential backoff.
 // The label is used for log messages so the user can see which attempt is
 // retrying. A client-side timeout is the exception: re-issuing the identical
