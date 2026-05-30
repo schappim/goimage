@@ -8,10 +8,15 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+// quoteEscaper mirrors the (unexported) escaper mime/multipart uses for
+// Content-Disposition field/file names, so our hand-built parts stay valid.
+var quoteEscaper = strings.NewReplacer("\\", "\\\\", `"`, "\\\"")
 
 // openAIRequest is the body POSTed to /v1/images/generations for gpt-image-*
 // models. Fields are omitted when empty so the API gets to apply its own
@@ -195,18 +200,25 @@ func openAIEditCall(apiKey, model, prompt, size, quality, format string, count i
 	return body, nil
 }
 
-// attachFile streams a file into a multipart writer using the file's basename.
-// The OpenAI API derives the MIME type from the filename extension, so the
-// name passed here matters.
+// attachFile streams a file into a multipart writer as an image part. We build
+// the part by hand rather than using mw.CreateFormFile because that helper
+// hardcodes Content-Type: application/octet-stream, which the OpenAI edits
+// endpoint rejects ("unsupported mimetype"). We set the real image mimetype
+// (derived from the extension) so image[] and mask uploads are accepted.
 func attachFile(mw *multipart.Writer, field, path string) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", path, err)
 	}
 	defer f.Close()
-	fw, err := mw.CreateFormFile(field, filepath.Base(path))
+
+	h := make(textproto.MIMEHeader)
+	h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`,
+		quoteEscaper.Replace(field), quoteEscaper.Replace(filepath.Base(path))))
+	h.Set("Content-Type", mimeFromExt(path))
+	fw, err := mw.CreatePart(h)
 	if err != nil {
-		return fmt.Errorf("create form file for %s: %w", path, err)
+		return fmt.Errorf("create form part for %s: %w", path, err)
 	}
 	if _, err := io.Copy(fw, f); err != nil {
 		return fmt.Errorf("copy %s into form: %w", path, err)

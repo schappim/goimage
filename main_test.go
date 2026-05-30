@@ -704,6 +704,8 @@ func TestGenerateOpenAI_EditWithInputsAndMask(t *testing.T) {
 		gotModel     string
 		imageCount   int
 		gotMaskBytes int
+		gotImageCT   string
+		gotMaskCT    string
 	)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -719,7 +721,11 @@ func TestGenerateOpenAI_EditWithInputsAndMask(t *testing.T) {
 		gotPrompt = r.FormValue("prompt")
 		gotModel = r.FormValue("model")
 		imageCount = len(r.MultipartForm.File["image[]"])
+		if hs := r.MultipartForm.File["image[]"]; len(hs) > 0 {
+			gotImageCT = hs[0].Header.Get("Content-Type")
+		}
 		if hs, ok := r.MultipartForm.File["mask"]; ok && len(hs) > 0 {
+			gotMaskCT = hs[0].Header.Get("Content-Type")
 			f, _ := hs[0].Open()
 			defer f.Close()
 			b, _ := io.ReadAll(f)
@@ -752,6 +758,15 @@ func TestGenerateOpenAI_EditWithInputsAndMask(t *testing.T) {
 	}
 	if gotMaskBytes == 0 {
 		t.Fatalf("mask was not attached")
+	}
+	// The OpenAI edits endpoint rejects application/octet-stream, so every
+	// uploaded part must declare a real image mimetype (derived from the .png
+	// extension here), not the multipart default.
+	if gotImageCT != "image/png" {
+		t.Fatalf("image[] Content-Type: want image/png, got %q", gotImageCT)
+	}
+	if gotMaskCT != "image/png" {
+		t.Fatalf("mask Content-Type: want image/png, got %q", gotMaskCT)
 	}
 }
 
