@@ -111,14 +111,14 @@ goimage -p grok -n 4 -o variants.png "logo for a Go CLI called goimage"
 
 ### Choose a Model
 
-**OpenAI models:** `gpt-image-2` (default), `gpt-image-1.5`, `gpt-image-1`, `gpt-image-1-mini`
+**OpenAI models:** `gpt-image-2.5-sunburst` (default), `gpt-image-2.5-flare`, `gpt-image-2`. Other model IDs and dated snapshots can be selected with `--model`.
 
-> `gpt-image-2` requires API Organization Verification. If your key isn't verified, use `-m gpt-image-1` (or `gpt-image-1-mini` / `gpt-image-1.5`) to fall back to an earlier model.
+Sunburst is OpenAI's current recommendation for precise image editing; Flare is the faster option for everyday generation. GPT Image models may require API Organization Verification. See the [official OpenAI image generation guide](https://developers.openai.com/api/docs/guides/image-generation) for availability and capabilities.
 
 ```bash
-goimage "a photorealistic kitchen interior at golden hour"     # gpt-image-2 by default
-goimage -m gpt-image-1 "fallback when your key isn't verified"
-goimage -m gpt-image-1-mini "quick thumbnail of a smiling robot"
+goimage "a photorealistic kitchen interior at golden hour"     # Sunburst by default
+goimage -m gpt-image-2.5-flare "quick thumbnail of a smiling robot"
+goimage -m gpt-image-2 "a watercolor landscape"
 ```
 
 **Google models:** `gemini-2.5-flash-image` (default)
@@ -136,7 +136,11 @@ goimage -s 1024x1536 "a portrait of an astronaut on Mars"
 # Quality
 goimage -q low "rough draft - book cover concept"
 goimage -q high "final book cover with detailed typography"
+goimage -q xhigh "a detailed illustrated map"
+goimage -q max "a polished product campaign image"
 ```
+
+GPT Image 2.5 supports `low`, `medium`, `high`, `xhigh`, `max`, and `auto`; earlier models support up to `high`. Custom sizes such as `1536x864` are also supported by GPT Image 2 and 2.5: edges must be multiples of 16, no larger than 3840, with aspect ratio between 1:3 and 3:1 and 655,360–8,294,400 total pixels. Resolutions above `2560x1440` are experimental.
 
 ### Output Format (OpenAI)
 
@@ -162,11 +166,17 @@ goimage -n 3 -o cat.png "a cat in a hat"
 
 ### Reference Images (image-to-image / edits)
 
-Pass `-i` one or more times to use existing images as reference. OpenAI swaps to its `/v1/images/edits` endpoint; Google attaches each image as an `inlineData` part alongside the prompt. Grok does not support reference images and will error.
+Pass `--reference`, `--input`, or `-i` one or more times to use local images as references. The aliases can be mixed and preserve input order. OpenAI uses its `/v1/images/edits` endpoint with Sunburst by default; Google attaches each image as an `inlineData` part alongside the prompt. Grok does not support reference images and will error. Place all options before the prompt.
+
+OpenAI references must contain PNG, JPEG, or WebP data. The content type is detected from the file, so an extension is optional. Missing, empty, and unsupported files are rejected before contacting OpenAI. Reference edits support streaming progress by default, `--stream=false`, and multiple outputs with `-n`.
 
 ```bash
 # Re-render an image with a new style
 goimage -i original.png "make it watercolor"
+
+# Use a product photo and a style reference
+goimage --reference product.png --reference style.jpg -o poster.png \
+        "create a poster for this product using the style of the second image"
 
 # Multi-image composition (OpenAI gift basket pattern)
 goimage -i lotion.png -i bath-bomb.png -i incense.png \
@@ -197,11 +207,12 @@ goimage --open "a desk setup with mechanical keyboard and ferns"
 | `--model`     | `-m`  | Model to use                                      | Provider-specific |
 | `--output`    | `-o`  | Save to this path                                 | Auto-named  |
 | `--size`      | `-s`  | Image size (OpenAI)                               | `1024x1024` |
-| `--quality`   | `-q`  | `low` / `medium` / `high` / `auto` (OpenAI)       | `auto`      |
+| `--quality`   | `-q`  | `low` / `medium` / `high` / `xhigh` / `max` / `auto` (OpenAI) | `auto` |
 | `--format`    |       | `png` / `jpeg` / `webp` (OpenAI)                  | `png`       |
 | `--aspect`    |       | Aspect ratio (Google)                             | `1:1`       |
 | `--count`     | `-n`  | Number of images                                  | `1`         |
 | `--input`     | `-i`  | Reference image path (repeatable)                 | -           |
+| `--reference` |       | Alias for `--input` (repeatable)                  | -           |
 | `--mask`      |       | Mask image (alpha) for OpenAI inpainting          | -           |
 | `--stream`    |       | Stream OpenAI partial-image events to stderr      | `true`      |
 | `--timeout`   |       | Max wait for the provider, e.g. `300s`, `10m`     | `5m`        |
@@ -214,9 +225,9 @@ goimage --open "a desk setup with mechanical keyboard and ferns"
 | Feature           | OpenAI                 | Google (nano banana)             | Grok                |
 |-------------------|------------------------|----------------------------------|---------------------|
 | Env var           | `OPENAI_API_KEY`       | `GEMINI_API_KEY` / `GOOGLE_API_KEY` | `XAI_API_KEY` / `GROK_API_KEY` |
-| Default model     | `gpt-image-2`          | `gemini-2.5-flash-image`         | `grok-2-image`      |
+| Default model     | `gpt-image-2.5-sunburst` | `gemini-2.5-flash-image`         | `grok-2-image`      |
 | Size control      | Yes (size flag)        | Aspect ratio only                | Provider-fixed      |
-| Quality control   | Yes (`low/medium/high`)| No                               | No                  |
+| Quality control   | Yes (`low/medium/high/xhigh/max/auto`) | No                    | No                  |
 | Output formats    | PNG, JPEG, WebP        | PNG                              | PNG                 |
 | Multi-image (`n`) | Native (single request)| Looped (one per request)         | Native              |
 | Reference (`-i`)  | Yes (`/v1/images/edits`)| Yes (inlineData parts)          | Not supported       |

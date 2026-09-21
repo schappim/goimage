@@ -14,11 +14,9 @@ import (
 const (
 	defaultProvider = "openai"
 
-	// OpenAI defaults. gpt-image-2 is the current recommended default per
-	// OpenAI's prompting guide. Note: this model requires API Organization
-	// Verification on the calling key; fall back to gpt-image-1 (or one of
-	// the *-1.5 / *-1-mini variants) via -m if verification isn't enabled.
-	defaultOpenAIModel   = "gpt-image-2"
+	// OpenAI's current model for image generation and precise reference edits.
+	// Use -m to select Flare, a dated snapshot, or an earlier model explicitly.
+	defaultOpenAIModel   = "gpt-image-2.5-sunburst"
 	defaultOpenAISize    = "1024x1024"
 	defaultOpenAIQuality = "auto"
 	defaultOpenAIFormat  = "png"

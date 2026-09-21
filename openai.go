@@ -46,6 +46,21 @@ type openAIError struct {
 }
 
 func generateOpenAI(apiKey, model, prompt, size, quality, format string, count int, inputs []string, mask string, stream bool, stderr io.Writer) ([]generatedImage, error) {
+	if mask != "" && len(inputs) == 0 {
+		return nil, fmt.Errorf("--mask requires at least one --input image")
+	}
+	// Reject unusable local files before making (or retrying) an API request.
+	paths := append([]string(nil), inputs...)
+	if mask != "" {
+		paths = append(paths, mask)
+	}
+	for _, path := range paths {
+		f, _, err := openReferenceImage(path)
+		if err != nil {
+			return nil, err
+		}
+		f.Close()
+	}
 
 	if size == "" {
 		size = defaultOpenAISize
@@ -204,18 +219,18 @@ func openAIEditCall(apiKey, model, prompt, size, quality, format string, count i
 // the part by hand rather than using mw.CreateFormFile because that helper
 // hardcodes Content-Type: application/octet-stream, which the OpenAI edits
 // endpoint rejects ("unsupported mimetype"). We set the real image mimetype
-// (derived from the extension) so image[] and mask uploads are accepted.
+// (detected from the content) so extensionless and misnamed files also work.
 func attachFile(mw *multipart.Writer, field, path string) error {
-	f, err := os.Open(path)
+	f, contentType, err := openReferenceImage(path)
 	if err != nil {
-		return fmt.Errorf("open %s: %w", path, err)
+		return err
 	}
 	defer f.Close()
 
 	h := make(textproto.MIMEHeader)
 	h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`,
 		quoteEscaper.Replace(field), quoteEscaper.Replace(filepath.Base(path))))
-	h.Set("Content-Type", mimeFromExt(path))
+	h.Set("Content-Type", contentType)
 	fw, err := mw.CreatePart(h)
 	if err != nil {
 		return fmt.Errorf("create form part for %s: %w", path, err)
@@ -224,6 +239,40 @@ func attachFile(mw *multipart.Writer, field, path string) error {
 		return fmt.Errorf("copy %s into form: %w", path, err)
 	}
 	return nil
+}
+
+// openReferenceImage validates an upload and returns it rewound for copying.
+func openReferenceImage(path string) (*os.File, string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, "", fmt.Errorf("open %s: %w", path, err)
+	}
+	fail := func(err error) (*os.File, string, error) {
+		f.Close()
+		return nil, "", fmt.Errorf("reference image %q: %w", path, err)
+	}
+	info, err := f.Stat()
+	if err != nil {
+		return fail(err)
+	}
+	if !info.Mode().IsRegular() || info.Size() == 0 {
+		return fail(fmt.Errorf("expected a non-empty regular image file"))
+	}
+	var header [512]byte
+	n, err := f.Read(header[:])
+	if err != nil && err != io.EOF {
+		return fail(err)
+	}
+	contentType := http.DetectContentType(header[:n])
+	switch contentType {
+	case "image/png", "image/jpeg", "image/webp":
+	default:
+		return fail(fmt.Errorf("unsupported content type %s; use PNG, JPEG, or WebP", contentType))
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return fail(err)
+	}
+	return f, contentType, nil
 }
 
 func openAICall(apiKey, model, prompt, size, quality, format string, count int) ([]byte, error) {
