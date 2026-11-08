@@ -8,13 +8,14 @@ A self-contained command-line tool for image generation using OpenAI (GPT Image)
 - **Single binary** - written in pure Go, no Python, no node, no ffmpeg
 - **Reference input images** (`-i`) for image-to-image / edits on OpenAI and Google
 - **Mask support** (`--mask`) for OpenAI inpainting
+- **GPT Image 2.6** (default): markup-guided edits (`--markup`), SVG output, animated GIF output, and `--complexity` control
 - **Automatic retries** - transient network/upstream blips retried up to 3 times with exponential backoff (a client-side timeout is reported immediately, not retried)
 - **Configurable timeout** - `--timeout` sets a single deadline (default 5m) applied as a context deadline, so slow renders aren't cut off mid-flight
 - **Actionable errors** - a timeout or connectivity failure is explained in plain language with what to try next, instead of a raw Go transport string
 - **Streaming progress** - OpenAI partial-image events surface on stderr as the model renders (`--stream`, default on)
 - Provider-native model defaults and overrides
 - Prompt from arguments or stdin (great for piping)
-- Save to PNG, JPEG, or WebP (where the provider supports it)
+- Save to PNG, JPEG, or WebP (where the provider supports it), plus SVG and animated GIF with OpenAI GPT Image 2.6
 - Auto-named output files when `-o` is omitted
 - `--open` to view the result in your default image viewer
 - Cross-platform (macOS, Linux, Windows)
@@ -111,13 +112,14 @@ goimage -p grok -n 4 -o variants.png "logo for a Go CLI called goimage"
 
 ### Choose a Model
 
-**OpenAI models:** `gpt-image-2.5-sunburst` (default), `gpt-image-2.5-flare`, `gpt-image-2`. Other model IDs and dated snapshots can be selected with `--model`.
+**OpenAI models:** `gpt-image-2.6-sunburst` (default), `gpt-image-2.6-flare`, `gpt-image-2.5-sunburst`, `gpt-image-2.5-flare`, `gpt-image-2`. Other model IDs and dated snapshots can be selected with `--model`.
 
-Sunburst is OpenAI's current recommendation for precise image editing; Flare is the faster option for everyday generation. GPT Image models may require API Organization Verification. See the [official OpenAI image generation guide](https://developers.openai.com/api/docs/guides/image-generation) for availability and capabilities.
+Sunburst is OpenAI's choice for detailed compositions and accurate edits; Flare is the faster option for interactive work. Both GPT Image 2.6 models support `--complexity`, `--markup`, SVG output and animated GIF output. GPT Image models may require API Organization Verification. See the [official OpenAI image generation guide](https://developers.openai.com/api/docs/guides/image-generation) for availability and capabilities.
 
 ```bash
-goimage "a photorealistic kitchen interior at golden hour"     # Sunburst by default
-goimage -m gpt-image-2.5-flare "quick thumbnail of a smiling robot"
+goimage "a photorealistic kitchen interior at golden hour"     # GPT Image 2.6 Sunburst by default
+goimage -m gpt-image-2.6-flare "quick thumbnail of a smiling robot"
+goimage -m gpt-image-2.5-sunburst "a detailed illustrated map"
 goimage -m gpt-image-2 "a watercolor landscape"
 ```
 
@@ -140,7 +142,7 @@ goimage -q xhigh "a detailed illustrated map"
 goimage -q max "a polished product campaign image"
 ```
 
-GPT Image 2.5 supports `low`, `medium`, `high`, `xhigh`, `max`, and `auto`; earlier models support up to `high`. Custom sizes such as `1536x864` are also supported by GPT Image 2 and 2.5: edges must be multiples of 16, no larger than 3840, with aspect ratio between 1:3 and 3:1 and 655,360–8,294,400 total pixels. Resolutions above `2560x1440` are experimental.
+GPT Image 2.5 and 2.6 support `low`, `medium`, `high`, `xhigh`, `max`, and `auto`; earlier models support up to `high`. Custom sizes such as `1536x864` are also supported by GPT Image 2, 2.5 and 2.6: edges must be multiples of 16, no larger than 3840, with aspect ratio between 1:3 and 3:1 and 655,360–8,294,400 total pixels. Resolutions above `2560x1440` are experimental.
 
 ### Output Format (OpenAI)
 
@@ -149,6 +151,41 @@ goimage --format png  "default PNG output"
 goimage --format jpeg "smaller JPEG"
 goimage --format webp "modern WebP"
 ```
+
+### Complexity (OpenAI GPT Image 2.6)
+
+`--complexity` controls how much the model plans before rendering: `low`, `medium`, or `high` (the API default). Lower suits focused edits such as swapping a background; higher helps with dense text, complex layouts and relationships between objects, at the cost of latency. It is separate from `--quality`, which controls rendering, and has no extra fee.
+
+```bash
+goimage --complexity high "an infographic poster with six labelled steps"
+goimage -i shop.jpg --complexity low "change the sign to read OPEN"
+```
+
+### SVG Output (OpenAI GPT Image 2.6)
+
+```bash
+goimage --format svg -o logo.svg "flat vector logo for Field & Flour bakery"
+```
+
+SVG is for icons, logos and illustrations you want as editable paths. It works for generation only (not with `--input`), one image per request, and doesn't stream.
+
+The image model renders a reference image (`--quality` and `--complexity` apply to it), then a second model authors the SVG from it. `--svg-model` picks that author (default `gpt-6-sol`) and `--svg-effort` sets its reasoning effort. You pay the image model's rate for the reference image plus the author model's token rate. If your account doesn't have SVG model selection, pass `--svg-model ""` to leave the author choice to OpenAI.
+
+```bash
+goimage --format svg --svg-model gpt-6-luna --svg-effort low -o icon.svg "simple flat camera icon"
+```
+
+### Animated GIF Output (OpenAI GPT Image 2.6)
+
+```bash
+goimage --format gif -o lantern.gif "a monkey lifts a glowing lantern, blinks, and lowers it; seamless loop"
+goimage --format gif --frames 12 --frame-duration 120ms "a paper boat bobbing on waves"
+
+# Animate from still reference images (edits endpoint)
+goimage -i mascot.png --format gif --frames 6 "the mascot waves hello and returns to rest"
+```
+
+Describe the subject, the motion and how it loops. `--frames` is 2–16 (default 9) and `--frame-duration` is the time per frame, 20ms–2s (default 200ms, rounded to 10ms). GIFs can't be combined with `--mask`. `--size` sets each frame's size and defaults to `auto` for GIFs, since every frame counts against the request's pixel budget; if a request is too large, lower `--frames`, the size, or `-n`. GIFs don't stream.
 
 ### Multiple Images at Once
 
@@ -185,6 +222,10 @@ goimage -i lotion.png -i bath-bomb.png -i incense.png \
 # Inpainting with a mask (OpenAI only — mask alpha channel defines edit area)
 goimage -i lounge.png --mask pool-mask.png "put a flamingo in the pool"
 
+# Markup-guided edit (OpenAI GPT Image 2.5/2.6): circle or sketch on a transparent PNG
+goimage -i kitchen.jpg --markup vase-circle.png \
+  "Recolor the vase inside the red circle to cobalt blue. Keep everything else unchanged. Remove the red circle."
+
 # Google nano banana conversational edit
 goimage -p google -i fox.png "make the season autumn, add falling leaves"
 ```
@@ -208,12 +249,18 @@ goimage --open "a desk setup with mechanical keyboard and ferns"
 | `--output`    | `-o`  | Save to this path                                 | Auto-named  |
 | `--size`      | `-s`  | Image size (OpenAI)                               | `1024x1024` |
 | `--quality`   | `-q`  | `low` / `medium` / `high` / `xhigh` / `max` / `auto` (OpenAI) | `auto` |
-| `--format`    |       | `png` / `jpeg` / `webp` (OpenAI)                  | `png`       |
+| `--format`    |       | `png` / `jpeg` / `webp` / `svg` / `gif` (OpenAI)  | `png`       |
+| `--complexity` |      | `low` / `medium` / `high` planning (OpenAI 2.6)   | API default (`high`) |
+| `--frames`    |       | GIF frame count, 2–16                             | `9`         |
+| `--frame-duration` |  | GIF time per frame, 20ms–2s                       | `200ms`     |
+| `--svg-model` |       | Model that authors SVG output (`""` to omit)      | `gpt-6-sol` |
+| `--svg-effort` |      | Reasoning effort for the SVG author               | Model default |
 | `--aspect`    |       | Aspect ratio (Google)                             | `1:1`       |
 | `--count`     | `-n`  | Number of images                                  | `1`         |
 | `--input`     | `-i`  | Reference image path (repeatable)                 | -           |
 | `--reference` |       | Alias for `--input` (repeatable)                  | -           |
 | `--mask`      |       | Mask image (alpha) for OpenAI inpainting          | -           |
+| `--markup`    |       | Transparent PNG annotations for the first `--input` (OpenAI) | - |
 | `--stream`    |       | Stream OpenAI partial-image events to stderr      | `true`      |
 | `--timeout`   |       | Max wait for the provider, e.g. `300s`, `10m`     | `5m`        |
 | `--open`      |       | Open the saved image                              | `false`     |
@@ -225,13 +272,14 @@ goimage --open "a desk setup with mechanical keyboard and ferns"
 | Feature           | OpenAI                 | Google (nano banana)             | Grok                |
 |-------------------|------------------------|----------------------------------|---------------------|
 | Env var           | `OPENAI_API_KEY`       | `GEMINI_API_KEY` / `GOOGLE_API_KEY` | `XAI_API_KEY` / `GROK_API_KEY` |
-| Default model     | `gpt-image-2.5-sunburst` | `gemini-2.5-flash-image`         | `grok-2-image`      |
+| Default model     | `gpt-image-2.6-sunburst` | `gemini-2.5-flash-image`         | `grok-2-image`      |
 | Size control      | Yes (size flag)        | Aspect ratio only                | Provider-fixed      |
 | Quality control   | Yes (`low/medium/high/xhigh/max/auto`) | No                    | No                  |
-| Output formats    | PNG, JPEG, WebP        | PNG                              | PNG                 |
+| Output formats    | PNG, JPEG, WebP, SVG, GIF | PNG                              | PNG                 |
 | Multi-image (`n`) | Native (single request)| Looped (one per request)         | Native              |
 | Reference (`-i`)  | Yes (`/v1/images/edits`)| Yes (inlineData parts)          | Not supported       |
 | Mask (`--mask`)   | Yes (alpha channel)    | No                               | No                  |
+| Markup (`--markup`) | Yes (GPT Image 2.5/2.6) | No                            | No                  |
 
 ## Scripting Examples
 
