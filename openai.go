@@ -22,12 +22,104 @@ var quoteEscaper = strings.NewReplacer("\\", "\\\\", `"`, "\\\"")
 // models. Fields are omitted when empty so the API gets to apply its own
 // defaults (e.g. quality=auto, size=auto).
 type openAIRequest struct {
-	Model        string `json:"model"`
-	Prompt       string `json:"prompt"`
-	N            int    `json:"n,omitempty"`
-	Size         string `json:"size,omitempty"`
-	Quality      string `json:"quality,omitempty"`
-	OutputFormat string `json:"output_format,omitempty"`
+	Model           string      `json:"model"`
+	Prompt          string      `json:"prompt"`
+	N               int         `json:"n,omitempty"`
+	Size            string      `json:"size,omitempty"`
+	Quality         string      `json:"quality,omitempty"`
+	OutputFormat    string      `json:"output_format,omitempty"`
+	Complexity      string      `json:"complexity,omitempty"`
+	FrameCount      int         `json:"frame_count,omitempty"`
+	FrameDurationMS int         `json:"frame_duration_ms,omitempty"`
+	SVG             *svgOptions `json:"svg,omitempty"`
+}
+
+// svgOptions selects the model (and its reasoning effort) that authors SVG
+// output from the image model's reference render.
+type svgOptions struct {
+	Model     string        `json:"model"`
+	Reasoning *svgReasoning `json:"reasoning,omitempty"`
+}
+
+type svgReasoning struct {
+	Effort string `json:"effort"`
+}
+
+// openAIOptions carries the GPT Image 2.6 request fields. Zero values are
+// omitted from the request so the API applies its own defaults (complexity
+// high, 9 GIF frames at 200 ms each).
+type openAIOptions struct {
+	complexity      string // low, medium, high
+	markup          string // transparent PNG annotation layer for the first input image
+	frameCount      int    // GIF only: 2–16
+	frameDurationMS int    // GIF only: 20 ms or more
+	svgModel        string // SVG only: model that authors the SVG; empty omits the svg object
+	svgEffort       string // SVG only: author reasoning effort; empty uses the model default
+}
+
+// svgRequest returns the svg request object, or nil when it should be omitted
+// (non-SVG output, or an account without SVG model selection).
+func (o openAIOptions) svgRequest(format string) *svgOptions {
+	if format != "svg" || o.svgModel == "" {
+		return nil
+	}
+	svg := &svgOptions{Model: o.svgModel}
+	if o.svgEffort != "" {
+		svg.Reasoning = &svgReasoning{Effort: o.svgEffort}
+	}
+	return svg
+}
+
+// formFields renders the options as multipart form fields for the edits endpoint.
+func (o openAIOptions) formFields() []struct{ k, v string } {
+	var out []struct{ k, v string }
+	if o.complexity != "" {
+		out = append(out, struct{ k, v string }{"complexity", o.complexity})
+	}
+	if o.frameCount > 0 {
+		out = append(out, struct{ k, v string }{"frame_count", fmt.Sprint(o.frameCount)})
+	}
+	if o.frameDurationMS > 0 {
+		out = append(out, struct{ k, v string }{"frame_duration_ms", fmt.Sprint(o.frameDurationMS)})
+	}
+	return out
+}
+
+// validateOpenAIOptions checks the combinations the API documents as invalid,
+// so the user gets a clear message instead of a round-trip and a 400.
+func validateOpenAIOptions(format string, count int, inputs []string, mask string, opts openAIOptions) error {
+	if opts.markup != "" {
+		if len(inputs) == 0 {
+			return fmt.Errorf("--markup requires an --input image to annotate")
+		}
+		if mask != "" {
+			return fmt.Errorf("--markup cannot be combined with --mask")
+		}
+	}
+	if format == "svg" {
+		if count != 1 {
+			return fmt.Errorf("SVG output supports only one image per request (use -n 1)")
+		}
+		if len(inputs) > 0 {
+			return fmt.Errorf("SVG output is only available for generation, not edits; remove --input")
+		}
+	}
+	if format != "svg" && opts.svgEffort != "" {
+		return fmt.Errorf("--svg-effort requires --format svg")
+	}
+	if format == "gif" && mask != "" {
+		return fmt.Errorf("GIF output does not support --mask")
+	}
+	if format != "gif" && (opts.frameCount != 0 || opts.frameDurationMS != 0) {
+		return fmt.Errorf("--frames and --frame-duration require --format gif")
+	}
+	if opts.frameCount != 0 && (opts.frameCount < 2 || opts.frameCount > 16) {
+		return fmt.Errorf("--frames must be between 2 and 16 (got %d)", opts.frameCount)
+	}
+	if opts.frameDurationMS != 0 && opts.frameDurationMS < 20 {
+		return fmt.Errorf("--frame-duration must be at least 20ms (got %dms)", opts.frameDurationMS)
+	}
+	return nil
 }
 
 type openAIResponse struct {
@@ -45,10 +137,24 @@ type openAIError struct {
 	Message string `json:"message"`
 }
 
-func generateOpenAI(apiKey, model, prompt, size, quality, format string, count int, inputs []string, mask string, stream bool, stderr io.Writer) ([]generatedImage, error) {
+func generateOpenAI(apiKey, model, prompt, size, quality, format string, count int, inputs []string, mask string, stream bool, stderr io.Writer, opts openAIOptions) ([]generatedImage, error) {
 	if mask != "" && len(inputs) == 0 {
 		return nil, fmt.Errorf("--mask requires at least one --input image")
 	}
+	if format == "" {
+		format = defaultOpenAIFormat
+	}
+	format = strings.ToLower(format)
+	switch format {
+	case "png", "jpeg", "webp", "svg", "gif":
+	default:
+		return nil, fmt.Errorf("invalid OpenAI format %q (expected png, jpeg, webp, svg, or gif)", format)
+	}
+	opts.complexity = strings.ToLower(opts.complexity)
+	if err := validateOpenAIOptions(format, count, inputs, mask, opts); err != nil {
+		return nil, err
+	}
+
 	// Reject unusable local files before making (or retrying) an API request.
 	paths := append([]string(nil), inputs...)
 	if mask != "" {
@@ -61,35 +167,43 @@ func generateOpenAI(apiKey, model, prompt, size, quality, format string, count i
 		}
 		f.Close()
 	}
+	if opts.markup != "" {
+		f, contentType, err := openReferenceImage(opts.markup)
+		if err != nil {
+			return nil, err
+		}
+		f.Close()
+		// The annotation layer must keep its transparency, so only PNG works.
+		if contentType != "image/png" {
+			return nil, fmt.Errorf("markup %q: must be a transparent PNG, got %s", opts.markup, contentType)
+		}
+	}
 
 	if size == "" {
 		size = defaultOpenAISize
+		// For GIFs size is per frame and every frame counts against the
+		// request's pixel budget, so let the API pick a frame size that fits.
+		if format == "gif" {
+			size = "auto"
+		}
 	}
 	if quality == "" {
 		quality = defaultOpenAIQuality
 	}
-	if format == "" {
-		format = defaultOpenAIFormat
-	}
-	format = strings.ToLower(format)
-	switch format {
-	case "png", "jpeg", "webp":
-	default:
-		return nil, fmt.Errorf("invalid OpenAI format %q (expected png, jpeg, or webp)", format)
-	}
 
 	// Streaming path: only meaningful for single-image requests. The SSE
 	// schema returns one final image regardless of n, so anything > 1 falls
-	// back to the JSON endpoint to preserve current behaviour.
-	if stream && count == 1 {
+	// back to the JSON endpoint to preserve current behaviour. SVG and GIF
+	// output don't support streaming or partial images at all.
+	if stream && count == 1 && format != "svg" && format != "gif" {
 		var (
 			img generatedImage
 			err error
 		)
 		if len(inputs) > 0 || mask != "" {
-			img, err = openAIEditStreamCall(apiKey, model, prompt, size, quality, format, inputs, mask, stderr)
+			img, err = openAIEditStreamCall(apiKey, model, prompt, size, quality, format, inputs, mask, opts, stderr)
 		} else {
-			img, err = openAIStreamCall(apiKey, model, prompt, size, quality, format, stderr)
+			img, err = openAIStreamCall(apiKey, model, prompt, size, quality, format, opts, stderr)
 		}
 		if err != nil {
 			return nil, err
@@ -99,12 +213,12 @@ func generateOpenAI(apiKey, model, prompt, size, quality, format string, count i
 
 	label := "openai"
 	call := func() ([]byte, error) {
-		return openAICall(apiKey, model, prompt, size, quality, format, count)
+		return openAICall(apiKey, model, prompt, size, quality, format, count, opts)
 	}
 	if len(inputs) > 0 || mask != "" {
 		label = "openai-edit"
 		call = func() ([]byte, error) {
-			return openAIEditCall(apiKey, model, prompt, size, quality, format, count, inputs, mask)
+			return openAIEditCall(apiKey, model, prompt, size, quality, format, count, inputs, mask, opts)
 		}
 	}
 
@@ -124,10 +238,7 @@ func generateOpenAI(apiKey, model, prompt, size, quality, format string, count i
 		return nil, fmt.Errorf("api returned no images")
 	}
 
-	ext := format
-	if ext == "jpeg" {
-		ext = "jpg"
-	}
+	ext := extForFormat(format)
 
 	out := make([]generatedImage, 0, len(resp.Data))
 	for _, d := range resp.Data {
@@ -147,10 +258,21 @@ func generateOpenAI(apiKey, model, prompt, size, quality, format string, count i
 	return out, nil
 }
 
+// extForFormat maps an output_format value to the file extension we save with.
+func extForFormat(format string) string {
+	switch format {
+	case "", "png":
+		return "png"
+	case "jpeg":
+		return "jpg"
+	}
+	return format
+}
+
 // openAIEditCall posts to /v1/images/edits as multipart/form-data with one or
-// more reference images (image[]) and an optional alpha-channel mask. Plain
-// generation parameters ride along as form fields.
-func openAIEditCall(apiKey, model, prompt, size, quality, format string, count int, inputs []string, mask string) ([]byte, error) {
+// more reference images (image[]), an optional alpha-channel mask or markup
+// layer, and the plain generation parameters as form fields.
+func openAIEditCall(apiKey, model, prompt, size, quality, format string, count int, inputs []string, mask string, opts openAIOptions) ([]byte, error) {
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 
@@ -160,28 +282,22 @@ func openAIEditCall(apiKey, model, prompt, size, quality, format string, count i
 		}
 		return mw.WriteField(name, value)
 	}
-	for _, kv := range []struct{ k, v string }{
+	fields := append([]struct{ k, v string }{
 		{"model", model},
 		{"prompt", prompt},
 		{"size", size},
 		{"quality", quality},
 		{"output_format", format},
 		{"n", fmt.Sprintf("%d", count)},
-	} {
+	}, opts.formFields()...)
+	for _, kv := range fields {
 		if err := addField(kv.k, kv.v); err != nil {
 			return nil, fmt.Errorf("write field %s: %w", kv.k, err)
 		}
 	}
 
-	for _, path := range inputs {
-		if err := attachFile(mw, "image[]", path); err != nil {
-			return nil, err
-		}
-	}
-	if mask != "" {
-		if err := attachFile(mw, "mask", mask); err != nil {
-			return nil, err
-		}
+	if err := attachEditFiles(mw, inputs, mask, opts.markup); err != nil {
+		return nil, err
 	}
 	if err := mw.Close(); err != nil {
 		return nil, fmt.Errorf("close multipart writer: %w", err)
@@ -213,6 +329,27 @@ func openAIEditCall(apiKey, model, prompt, size, quality, format string, count i
 		return nil, apiError(resp.StatusCode, body)
 	}
 	return body, nil
+}
+
+// attachEditFiles adds the reference images, then the optional mask or markup
+// layer. Markup applies to the first image; the rest act as references.
+func attachEditFiles(mw *multipart.Writer, inputs []string, mask, markup string) error {
+	for _, path := range inputs {
+		if err := attachFile(mw, "image[]", path); err != nil {
+			return err
+		}
+	}
+	if mask != "" {
+		if err := attachFile(mw, "mask", mask); err != nil {
+			return err
+		}
+	}
+	if markup != "" {
+		if err := attachFile(mw, "markup", markup); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // attachFile streams a file into a multipart writer as an image part. We build
@@ -275,14 +412,18 @@ func openReferenceImage(path string) (*os.File, string, error) {
 	return f, contentType, nil
 }
 
-func openAICall(apiKey, model, prompt, size, quality, format string, count int) ([]byte, error) {
+func openAICall(apiKey, model, prompt, size, quality, format string, count int, opts openAIOptions) ([]byte, error) {
 	req := openAIRequest{
-		Model:        model,
-		Prompt:       prompt,
-		N:            count,
-		Size:         size,
-		Quality:      quality,
-		OutputFormat: format,
+		Model:           model,
+		Prompt:          prompt,
+		N:               count,
+		Size:            size,
+		Quality:         quality,
+		OutputFormat:    format,
+		Complexity:      opts.complexity,
+		FrameCount:      opts.frameCount,
+		FrameDurationMS: opts.frameDurationMS,
+		SVG:             opts.svgRequest(format),
 	}
 	jsonData, err := json.Marshal(req)
 	if err != nil {

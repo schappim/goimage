@@ -15,11 +15,14 @@ const (
 	defaultProvider = "openai"
 
 	// OpenAI's current model for image generation and precise reference edits.
-	// Use -m to select Flare, a dated snapshot, or an earlier model explicitly.
-	defaultOpenAIModel   = "gpt-image-2.5-sunburst"
+	// Use -m to select Flare, GPT Image 2.5, or an earlier model explicitly.
+	defaultOpenAIModel   = "gpt-image-2.6-sunburst"
 	defaultOpenAISize    = "1024x1024"
 	defaultOpenAIQuality = "auto"
 	defaultOpenAIFormat  = "png"
+	// Model that authors SVG output (--format svg) from the image model's
+	// reference render. Required when the account has SVG model selection.
+	defaultOpenAISVGModel = "gpt-6-sol"
 
 	// Google nano banana defaults.
 	defaultGoogleModel  = "gemini-2.5-flash-image"
@@ -62,7 +65,7 @@ var (
 // generatedImage is the common payload returned by every provider.
 type generatedImage struct {
 	data          []byte
-	ext           string // "png", "jpeg", "webp"
+	ext           string // "png", "jpg", "webp", "svg", "gif"
 	revisedPrompt string
 }
 

@@ -312,7 +312,7 @@ func TestGenerateOpenAI_HappyPath(t *testing.T) {
 
 	swapURL(&openAIAPIURL, srv.URL)(t)
 
-	imgs, err := generateOpenAI("test-key", "gpt-image-1", "a cat", "1024x1024", "high", "png", 1, nil, "", false, io.Discard)
+	imgs, err := generateOpenAI("test-key", "gpt-image-1", "a cat", "1024x1024", "high", "png", 1, nil, "", false, io.Discard, openAIOptions{})
 	if err != nil {
 		t.Fatalf("generateOpenAI: %v", err)
 	}
@@ -343,7 +343,7 @@ func TestGenerateOpenAI_JpegMapsToJpgExt(t *testing.T) {
 	defer srv.Close()
 	swapURL(&openAIAPIURL, srv.URL)(t)
 
-	imgs, err := generateOpenAI("k", "gpt-image-1", "x", "", "", "jpeg", 1, nil, "", false, io.Discard)
+	imgs, err := generateOpenAI("k", "gpt-image-1", "x", "", "", "jpeg", 1, nil, "", false, io.Discard, openAIOptions{})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -353,7 +353,7 @@ func TestGenerateOpenAI_JpegMapsToJpgExt(t *testing.T) {
 }
 
 func TestGenerateOpenAI_InvalidFormatRejected(t *testing.T) {
-	_, err := generateOpenAI("k", "gpt-image-1", "x", "", "", "bmp", 1, nil, "", false, io.Discard)
+	_, err := generateOpenAI("k", "gpt-image-1", "x", "", "", "bmp", 1, nil, "", false, io.Discard, openAIOptions{})
 	if err == nil || !strings.Contains(err.Error(), "invalid OpenAI format") {
 		t.Fatalf("expected format validation error, got %v", err)
 	}
@@ -371,7 +371,7 @@ func TestGenerateOpenAI_APIErrorSurfaces(t *testing.T) {
 	defer srv.Close()
 	swapURL(&openAIAPIURL, srv.URL)(t)
 
-	_, err := generateOpenAI("k", "gpt-image-1", "x", "", "", "png", 1, nil, "", false, io.Discard)
+	_, err := generateOpenAI("k", "gpt-image-1", "x", "", "", "png", 1, nil, "", false, io.Discard, openAIOptions{})
 	if err == nil || !strings.Contains(err.Error(), "API error (401)") {
 		t.Fatalf("expected 401 surface, got %v", err)
 	}
@@ -766,7 +766,7 @@ func TestGenerateOpenAI_EditWithInputsAndMask(t *testing.T) {
 	swapURL(&openAIEditsAPIURL, srv.URL)(t)
 
 	imgs, err := generateOpenAI("k", "gpt-image-2", "swap the sky", "1024x1024", "high", "png", 1,
-		[]string{in1, in2}, maskPath, false, io.Discard)
+		[]string{in1, in2}, maskPath, false, io.Discard, openAIOptions{})
 	if err != nil {
 		t.Fatalf("generateOpenAI (edit): %v", err)
 	}
@@ -798,7 +798,7 @@ func TestGenerateOpenAI_EditWithInputsAndMask(t *testing.T) {
 
 func TestGenerateOpenAI_EditMissingInputFails(t *testing.T) {
 	_, err := generateOpenAI("k", "gpt-image-2", "x", "", "", "png", 1,
-		[]string{"/nonexistent/ref.png"}, "", false, io.Discard)
+		[]string{"/nonexistent/ref.png"}, "", false, io.Discard, openAIOptions{})
 	if err == nil || !strings.Contains(err.Error(), "open /nonexistent/ref.png") {
 		t.Fatalf("expected missing-file error, got %v", err)
 	}
@@ -945,7 +945,7 @@ func TestGenerateOpenAI_StreamingHappyPath(t *testing.T) {
 	swapURL(&openAIAPIURL, srv.URL)(t)
 
 	var stderr bytes.Buffer
-	imgs, err := generateOpenAI("k", "gpt-image-2", "a cat", "1024x1024", "high", "png", 1, nil, "", true, &stderr)
+	imgs, err := generateOpenAI("k", "gpt-image-2", "a cat", "1024x1024", "high", "png", 1, nil, "", true, &stderr, openAIOptions{})
 	if err != nil {
 		t.Fatalf("generateOpenAI streaming: %v", err)
 	}
@@ -995,7 +995,7 @@ func TestGenerateOpenAI_StreamFallsBackToJSONForCountGreaterOne(t *testing.T) {
 	defer srv.Close()
 	swapURL(&openAIAPIURL, srv.URL)(t)
 
-	imgs, err := generateOpenAI("k", "gpt-image-2", "x", "", "", "png", 2, nil, "", true, io.Discard)
+	imgs, err := generateOpenAI("k", "gpt-image-2", "x", "", "", "png", 2, nil, "", true, io.Discard, openAIOptions{})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -1021,7 +1021,7 @@ func TestGenerateOpenAI_StreamMissingCompletedIsError(t *testing.T) {
 	defer srv.Close()
 	swapURL(&openAIAPIURL, srv.URL)(t)
 
-	_, err := generateOpenAI("k", "gpt-image-2", "x", "", "", "png", 1, nil, "", true, io.Discard)
+	_, err := generateOpenAI("k", "gpt-image-2", "x", "", "", "png", 1, nil, "", true, io.Discard, openAIOptions{})
 	if err == nil || !strings.Contains(err.Error(), "without a completed event") {
 		t.Fatalf("expected missing-completed error, got %v", err)
 	}
@@ -1035,7 +1035,7 @@ func TestGenerateOpenAI_StreamAPIError(t *testing.T) {
 	defer srv.Close()
 	swapURL(&openAIAPIURL, srv.URL)(t)
 
-	_, err := generateOpenAI("k", "gpt-image-2", "x", "", "", "png", 1, nil, "", true, io.Discard)
+	_, err := generateOpenAI("k", "gpt-image-2", "x", "", "", "png", 1, nil, "", true, io.Discard, openAIOptions{})
 	if err == nil || !strings.Contains(err.Error(), "API error (401)") {
 		t.Fatalf("expected 401 surface from stream, got %v", err)
 	}
@@ -1075,7 +1075,7 @@ func TestGenerateOpenAI_StreamEditEndpointWithInput(t *testing.T) {
 
 	var stderr bytes.Buffer
 	imgs, err := generateOpenAI("k", "gpt-image-2", "edit it", "1024x1024", "high", "png", 1,
-		[]string{ref}, "", true, &stderr)
+		[]string{ref}, "", true, &stderr, openAIOptions{})
 	if err != nil {
 		t.Fatalf("edit stream: %v", err)
 	}
@@ -1108,7 +1108,7 @@ func TestGenerateOpenAI_StreamDisabledTakesJSONPath(t *testing.T) {
 	defer srv.Close()
 	swapURL(&openAIAPIURL, srv.URL)(t)
 
-	imgs, err := generateOpenAI("k", "gpt-image-2", "x", "", "", "png", 1, nil, "", false, io.Discard)
+	imgs, err := generateOpenAI("k", "gpt-image-2", "x", "", "", "png", 1, nil, "", false, io.Discard, openAIOptions{})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}

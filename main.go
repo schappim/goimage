@@ -53,6 +53,13 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 		mask     string
 		stream   bool
 		timeout  time.Duration
+
+		complexity    string
+		markup        string
+		frames        int
+		frameDuration time.Duration
+		svgModel      string
+		svgEffort     string
 	)
 
 	fs := flag.NewFlagSet("goimage", flag.ContinueOnError)
@@ -68,7 +75,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 	fs.StringVar(&size, "s", "", "Image size (shorthand)")
 	fs.StringVar(&quality, "quality", "", "Quality: low, medium, high, xhigh, max, auto (OpenAI)")
 	fs.StringVar(&quality, "q", "", "Quality (shorthand)")
-	fs.StringVar(&format, "format", "", "Output format: png, jpeg, webp (OpenAI)")
+	fs.StringVar(&format, "format", "", "Output format: png, jpeg, webp, svg, gif (OpenAI)")
 	fs.StringVar(&aspect, "aspect", "", "Aspect ratio: 1:1, 16:9, 9:16, 4:3, 3:4 (Google)")
 	fs.IntVar(&count, "count", defaultCount, "Number of images to generate")
 	fs.IntVar(&count, "n", defaultCount, "Number of images to generate (shorthand)")
@@ -77,6 +84,12 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 	fs.Var(&inputs, "reference", "Reference image path (alias for --input, repeatable)")
 	fs.Var(&inputs, "i", "Reference image path (shorthand, repeatable)")
 	fs.StringVar(&mask, "mask", "", "Mask image (alpha channel) for OpenAI inpainting")
+	fs.StringVar(&complexity, "complexity", "", "Planning before rendering: low, medium, high (OpenAI GPT Image 2.6)")
+	fs.StringVar(&markup, "markup", "", "Transparent PNG annotation layer guiding an edit of the first --input (OpenAI)")
+	fs.IntVar(&frames, "frames", 0, "GIF frame count, 2-16 (OpenAI, --format gif)")
+	fs.DurationVar(&frameDuration, "frame-duration", 0, "GIF time per frame, 20ms-2s (OpenAI, --format gif)")
+	fs.StringVar(&svgModel, "svg-model", defaultOpenAISVGModel, "Model that authors SVG output; \"\" to omit (OpenAI, --format svg)")
+	fs.StringVar(&svgEffort, "svg-effort", "", "Reasoning effort for the SVG author, e.g. low, medium, high (OpenAI, --format svg)")
 	// --stream defaults to true. Currently only OpenAI surfaces progress;
 	// Google and Grok ignore the flag because their APIs don't stream partials.
 	fs.BoolVar(&stream, "stream", true, "Stream partial image progress to stderr (OpenAI only)")
@@ -162,7 +175,24 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 		return 1
 	}
 
-	images, err := generate(provider, apiKey, model, prompt, size, quality, format, aspect, count, inputs, mask, stream, stderr)
+	if frameDuration < 0 {
+		fmt.Fprintln(stderr, "Error: --frame-duration must be > 0 (e.g. 200ms)")
+		return 1
+	}
+	opts := openAIOptions{
+		complexity:      complexity,
+		markup:          markup,
+		frameCount:      frames,
+		frameDurationMS: int(frameDuration.Milliseconds()),
+		svgModel:        svgModel,
+		svgEffort:       strings.ToLower(svgEffort),
+	}
+	if provider != "openai" && (complexity != "" || markup != "" || frames != 0 || frameDuration != 0 || svgEffort != "") {
+		fmt.Fprintln(stderr, "Error: --complexity, --markup, --frames, --frame-duration and --svg-effort are OpenAI-only")
+		return 1
+	}
+
+	images, err := generate(provider, apiKey, model, prompt, size, quality, format, aspect, count, inputs, mask, stream, stderr, opts)
 	if err != nil {
 		fmt.Fprintf(stderr, "Error generating image: %s\n", explainError(err))
 		return 1
@@ -205,12 +235,18 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  -o, --output     Save image to this path (auto-named if omitted)\n")
 	fmt.Fprintf(w, "  -s, --size       Image size, e.g. 1024x1024 (OpenAI / Grok)\n")
 	fmt.Fprintf(w, "  -q, --quality    Quality: low, medium, high, xhigh, max, auto (OpenAI)\n")
-	fmt.Fprintf(w, "      --format     Output format: png, jpeg, webp (OpenAI)\n")
+	fmt.Fprintf(w, "      --format     Output format: png, jpeg, webp, svg, gif (OpenAI)\n")
 	fmt.Fprintf(w, "      --aspect     Aspect ratio (Google): 1:1, 16:9, 9:16, 4:3, 3:4\n")
 	fmt.Fprintf(w, "  -n, --count      Number of images to generate (default: 1)\n")
 	fmt.Fprintf(w, "  -i, --input      Reference image path (repeatable) for image-to-image / edit\n")
 	fmt.Fprintf(w, "      --reference  Alias for --input; repeat to combine reference images\n")
 	fmt.Fprintf(w, "      --mask       Mask image (alpha channel) for OpenAI inpainting\n")
+	fmt.Fprintf(w, "      --markup     Transparent PNG annotations marking what to edit in the first --input (OpenAI)\n")
+	fmt.Fprintf(w, "      --complexity How much the model plans before rendering: low, medium, high (OpenAI)\n")
+	fmt.Fprintf(w, "      --frames     GIF frame count, 2-16 (default 9; --format gif)\n")
+	fmt.Fprintf(w, "      --frame-duration  GIF time per frame, 20ms-2s (default 200ms; --format gif)\n")
+	fmt.Fprintf(w, "      --svg-model  Model that authors SVG output (default: %s; \"\" to omit; --format svg)\n", defaultOpenAISVGModel)
+	fmt.Fprintf(w, "      --svg-effort Reasoning effort for the SVG author, e.g. low, medium, high (--format svg)\n")
 	fmt.Fprintf(w, "      --stream     Stream partial image progress to stderr, OpenAI only (default: true; --stream=false to disable)\n")
 	fmt.Fprintf(w, "      --timeout    Max time to wait for the provider, e.g. 300s, 10m (default: 5m)\n")
 	fmt.Fprintf(w, "      --open       Open the saved image in your default viewer\n")
@@ -219,12 +255,15 @@ func printUsage(w io.Writer) {
 
 	fmt.Fprintf(w, "OpenAI:\n")
 	fmt.Fprintf(w, "  Env var: OPENAI_API_KEY\n")
-	fmt.Fprintf(w, "  Models:  %s (default), gpt-image-2.5-flare, gpt-image-2\n", defaultOpenAIModel)
+	fmt.Fprintf(w, "  Models:  %s (default), gpt-image-2.6-flare,\n", defaultOpenAIModel)
+	fmt.Fprintf(w, "           gpt-image-2.5-sunburst, gpt-image-2.5-flare, gpt-image-2\n")
 	fmt.Fprintf(w, "           Other model IDs and dated snapshots can be selected with --model.\n")
 	fmt.Fprintf(w, "           GPT Image models may require API Organization Verification.\n")
 	fmt.Fprintf(w, "  Sizes:   1024x1024, 1536x1024, 1024x1536, auto, or custom WIDTHxHEIGHT\n")
-	fmt.Fprintf(w, "  Quality: low, medium, high, xhigh, max, auto (xhigh/max require GPT Image 2.5)\n")
-	fmt.Fprintf(w, "  Formats: png (default), jpeg, webp\n\n")
+	fmt.Fprintf(w, "  Quality: low, medium, high, xhigh, max, auto (xhigh/max require GPT Image 2.5+)\n")
+	fmt.Fprintf(w, "  Formats: png (default), jpeg, webp; svg and gif with GPT Image 2.6\n")
+	fmt.Fprintf(w, "           svg: generation only, one image. gif: --frames, --frame-duration.\n")
+	fmt.Fprintf(w, "  Complexity: low, medium, high (default high, GPT Image 2.6)\n\n")
 
 	fmt.Fprintf(w, "Google (nano banana):\n")
 	fmt.Fprintf(w, "  Env var: GEMINI_API_KEY (or GOOGLE_API_KEY)\n")
@@ -242,15 +281,18 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  goimage -p google --aspect 16:9 --open \"a cyberpunk teacup\"\n")
 	fmt.Fprintf(w, "  echo \"a logo for goimage\" | goimage -p grok -o logo.png\n")
 	fmt.Fprintf(w, "  goimage -n 4 -o variants.png \"hand-drawn space whale\"\n")
+	fmt.Fprintf(w, "  goimage --format svg -o logo.svg \"flat vector logo for a bakery\"\n")
+	fmt.Fprintf(w, "  goimage --format gif --frames 12 -o wave.gif \"a cat waving, seamless loop\"\n")
+	fmt.Fprintf(w, "  goimage -i room.jpg --markup circle.png \"recolour the circled vase blue\"\n")
 }
 
 // generate dispatches to the requested provider. Kept as its own seam so each
 // provider's signature can vary while run() stays small. stream toggles
 // progress streaming on supported providers (OpenAI today).
-func generate(provider, apiKey, model, prompt, size, quality, format, aspect string, count int, inputs []string, mask string, stream bool, stderr io.Writer) ([]generatedImage, error) {
+func generate(provider, apiKey, model, prompt, size, quality, format, aspect string, count int, inputs []string, mask string, stream bool, stderr io.Writer, opts openAIOptions) ([]generatedImage, error) {
 	switch provider {
 	case "openai":
-		return generateOpenAI(apiKey, model, prompt, size, quality, format, count, inputs, mask, stream, stderr)
+		return generateOpenAI(apiKey, model, prompt, size, quality, format, count, inputs, mask, stream, stderr, opts)
 	case "google":
 		return generateGoogle(apiKey, model, prompt, aspect, count, inputs)
 	case "grok":

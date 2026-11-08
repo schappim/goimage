@@ -29,7 +29,7 @@ type imageStreamEvent struct {
 // model generates them. Returns an empty generatedImage if no final event
 // arrives (the API contract guarantees one, but we surface it as an error
 // rather than panicking on zero-length data).
-func openAIStreamCall(apiKey, model, prompt, size, quality, format string, stderr io.Writer) (generatedImage, error) {
+func openAIStreamCall(apiKey, model, prompt, size, quality, format string, opts openAIOptions, stderr io.Writer) (generatedImage, error) {
 	payload := map[string]any{
 		"model":          model,
 		"prompt":         prompt,
@@ -45,6 +45,9 @@ func openAIStreamCall(apiKey, model, prompt, size, quality, format string, stder
 	}
 	if format != "" {
 		payload["output_format"] = format
+	}
+	if opts.complexity != "" {
+		payload["complexity"] = opts.complexity
 	}
 
 	body, err := json.Marshal(payload)
@@ -68,11 +71,11 @@ func openAIStreamCall(apiKey, model, prompt, size, quality, format string, stder
 // openAIEditStreamCall is the multipart equivalent of openAIStreamCall for the
 // edits endpoint. Reference images and the optional mask ride along as form
 // files; everything else mirrors the generations stream.
-func openAIEditStreamCall(apiKey, model, prompt, size, quality, format string, inputs []string, mask string, stderr io.Writer) (generatedImage, error) {
+func openAIEditStreamCall(apiKey, model, prompt, size, quality, format string, inputs []string, mask string, opts openAIOptions, stderr io.Writer) (generatedImage, error) {
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 
-	fields := []struct{ k, v string }{
+	fields := append([]struct{ k, v string }{
 		{"model", model},
 		{"prompt", prompt},
 		{"size", size},
@@ -81,7 +84,7 @@ func openAIEditStreamCall(apiKey, model, prompt, size, quality, format string, i
 		{"n", "1"},
 		{"stream", "true"},
 		{"partial_images", fmt.Sprintf("%d", defaultOpenAIPartialImages)},
-	}
+	}, opts.formFields()...)
 	for _, kv := range fields {
 		if kv.v == "" {
 			continue
@@ -90,15 +93,8 @@ func openAIEditStreamCall(apiKey, model, prompt, size, quality, format string, i
 			return generatedImage{}, fmt.Errorf("write field %s: %w", kv.k, err)
 		}
 	}
-	for _, p := range inputs {
-		if err := attachFile(mw, "image[]", p); err != nil {
-			return generatedImage{}, err
-		}
-	}
-	if mask != "" {
-		if err := attachFile(mw, "mask", mask); err != nil {
-			return generatedImage{}, err
-		}
+	if err := attachEditFiles(mw, inputs, mask, opts.markup); err != nil {
+		return generatedImage{}, err
 	}
 	if err := mw.Close(); err != nil {
 		return generatedImage{}, fmt.Errorf("close multipart writer: %w", err)
@@ -134,13 +130,7 @@ func doStream(req *http.Request, label, format string, stderr io.Writer) (genera
 		return generatedImage{}, apiError(resp.StatusCode, body)
 	}
 
-	ext := format
-	switch ext {
-	case "", "png":
-		ext = "png"
-	case "jpeg":
-		ext = "jpg"
-	}
+	ext := extForFormat(format)
 
 	start := time.Now()
 	var finalB64 string

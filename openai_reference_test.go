@@ -23,7 +23,8 @@ func TestRunOpenAIReferenceImages(t *testing.T) {
 		{"default streaming", "", "xhigh", true, 1},
 		{"default JSON", "", "max", false, 1},
 		{"multiple outputs", "", "high", true, 2},
-		{"Flare override", "gpt-image-2.5-flare", "max", true, 1},
+		{"Flare override", "gpt-image-2.6-flare", "max", true, 1},
+		{"GPT Image 2.5", "gpt-image-2.5-sunburst", "max", true, 1},
 		{"snapshot override", "gpt-image-2.5-sunburst-2026-09-08", "high", false, 1},
 		{"older model", "gpt-image-2", "high", false, 1},
 	} {
@@ -31,7 +32,7 @@ func TestRunOpenAIReferenceImages(t *testing.T) {
 			refs := []string{writeTempPNG(t, "product"), writeTempPNG(t, "style.jpg"), writeTempPNG(t, "third.png")}
 			wantModel := tc.model
 			if wantModel == "" {
-				wantModel = "gpt-image-2.5-sunburst"
+				wantModel = "gpt-image-2.6-sunburst"
 			}
 			hits := 0
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -132,7 +133,7 @@ func TestOpenAIRejectsInvalidReferencesBeforeRequest(t *testing.T) {
 	swapURL(&openAIEditsAPIURL, srv.URL)(t)
 	for _, stream := range []bool{false, true} {
 		for _, path := range []string{empty, textFile, dir, filepath.Join(dir, "missing.png")} {
-			_, err := generateOpenAI("key", defaultOpenAIModel, "edit", "", "", "", 1, []string{path}, "", stream, io.Discard)
+			_, err := generateOpenAI("key", defaultOpenAIModel, "edit", "", "", "", 1, []string{path}, "", stream, io.Discard, openAIOptions{})
 			if err == nil || !strings.Contains(err.Error(), path) {
 				t.Errorf("path=%q stream=%v: expected file error, got %v", path, stream, err)
 			}
@@ -146,7 +147,7 @@ func TestRunOpenAIDefaultGenerationModel(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Error(err)
 		}
-		if req.Model != "gpt-image-2.5-sunburst" {
+		if req.Model != "gpt-image-2.6-sunburst" {
 			t.Errorf("default generation model = %q", req.Model)
 		}
 		json.NewEncoder(w).Encode(openAIResponse{Data: []openAIImageData{{B64JSON: base64.StdEncoding.EncodeToString(tinyPNG)}}})
