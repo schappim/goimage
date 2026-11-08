@@ -117,7 +117,8 @@ func explainError(err error) string {
 				"will hit the same deadline. Try one of:\n"+
 				"  - give it longer:      --timeout 10m\n"+
 				"  - make it cheaper:     --quality low   (or medium)\n"+
-				"  - watch live progress: --stream        (on by default for a single image)\n"+
+				"  - watch live progress: --stream        (on by default for a single image; SVG and GIF can't stream)\n"+
+				"  - plan less:           --complexity low (GPT Image 2.6), or fewer --frames for a GIF\n"+
 				"  - simplify the prompt, or lower --count\n"+
 				"(underlying error: %v)", httpTimeout, err)
 	}

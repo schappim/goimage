@@ -179,6 +179,12 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 		fmt.Fprintln(stderr, "Error: --frame-duration must be > 0 (e.g. 200ms)")
 		return 1
 	}
+	// Check the raw duration: converting to whole milliseconds would turn a
+	// sub-millisecond value into 0, which reads as "not set" downstream.
+	if frameDuration > 0 && frameDuration < 20*time.Millisecond {
+		fmt.Fprintf(stderr, "Error: --frame-duration must be at least 20ms (got %v)\n", frameDuration)
+		return 1
+	}
 	opts := openAIOptions{
 		complexity:      complexity,
 		markup:          markup,

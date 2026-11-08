@@ -107,6 +107,9 @@ func validateOpenAIOptions(format string, count int, inputs []string, mask strin
 	if format != "svg" && opts.svgEffort != "" {
 		return fmt.Errorf("--svg-effort requires --format svg")
 	}
+	if opts.svgEffort != "" && opts.svgModel == "" {
+		return fmt.Errorf("--svg-effort requires --svg-model (the svg settings are omitted when --svg-model is empty)")
+	}
 	if format == "gif" && mask != "" {
 		return fmt.Errorf("GIF output does not support --mask")
 	}
